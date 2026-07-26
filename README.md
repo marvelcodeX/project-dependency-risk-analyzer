@@ -70,7 +70,6 @@ pytest tests/ -v
 
 > 🚧 **Work in Progress** — Phase 1 of 6
 
-See [`SESSION-HANDOFF.md`](SESSION-HANDOFF.md) for current progress and [`Soteria-AI-Project-Plan.md`](Soteria-AI-Project-Plan.md) for the full roadmap.
 
 ## License
 
