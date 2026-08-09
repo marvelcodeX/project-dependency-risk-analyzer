@@ -3,7 +3,6 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 *.egg
-dist/
 build/
 .eggs/
 venv/
@@ -29,16 +28,26 @@ desktop.ini
 
 # Node / Frontend
 node_modules/
+dist/
 .next/
 out/
+.vite/
+*.tsbuildinfo
 
 # Testing
 .pytest_cache/
 .coverage
 htmlcov/
 
-# Docker
+# Logs
 *.log
+
+# Local database (SQLite dev store; use Postgres in prod)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+soteria.db
 
 
 /docs
