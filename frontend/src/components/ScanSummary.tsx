@@ -1,4 +1,5 @@
-import type { ScanResponse } from '../api'
+import type { ReportFormat, ScanResponse } from '../api'
+import { reportUrl } from '../api'
 import { normalizeSeverity, riskTextClass } from '../severity'
 
 interface Props {
@@ -6,6 +7,25 @@ interface Props {
 }
 
 const ORDER = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'UNKNOWN'] as const
+
+const EXPORTS: { format: ReportFormat; label: string; title: string }[] = [
+  { format: 'json', label: 'JSON', title: 'Full scan result as JSON' },
+  {
+    format: 'sarif',
+    label: 'SARIF',
+    title: 'SARIF 2.1.0 — upload to GitHub code scanning',
+  },
+  {
+    format: 'cyclonedx',
+    label: 'SBOM',
+    title: 'CycloneDX 1.5 SBOM with vulnerabilities',
+  },
+  {
+    format: 'markdown',
+    label: 'Markdown',
+    title: 'Markdown summary for a PR comment or ticket',
+  },
+]
 
 const COUNT_STYLES: Record<string, string> = {
   CRITICAL: 'text-rose-400',
@@ -32,7 +52,7 @@ export function ScanSummary({ scan }: Props) {
   return (
     <div className="space-y-3">
       {/* Overall project risk banner */}
-      <div className="flex items-center gap-4 rounded-xl border border-white/10 bg-white/[0.03] px-5 py-4">
+      <div className="flex flex-wrap items-center gap-4 rounded-xl border border-white/10 bg-white/[0.03] px-5 py-4">
         <div
           className={`text-4xl font-bold tabular-nums ${riskTextClass(
             scan.risk_level,
@@ -56,6 +76,31 @@ export function ScanSummary({ scan }: Props) {
             )}
           </div>
         </div>
+        {scan.id !== null && (
+          <div className="ml-auto flex flex-wrap items-center justify-end gap-1.5 text-xs">
+            <span className="mr-1 text-gray-500">Export</span>
+            {EXPORTS.map((x) => (
+              <a
+                key={x.format}
+                href={reportUrl(scan.id!, x.format)}
+                download
+                title={x.title}
+                className="rounded-md border border-white/15 px-2 py-1 font-medium text-gray-300 transition hover:bg-white/5"
+              >
+                {x.label}
+              </a>
+            ))}
+            <a
+              href={reportUrl(scan.id, 'html', false)}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Printable report — use your browser's Print → Save as PDF"
+              className="rounded-md border border-violet-500/40 px-2 py-1 font-medium text-violet-300 transition hover:bg-violet-500/10"
+            >
+              Print / PDF
+            </a>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">

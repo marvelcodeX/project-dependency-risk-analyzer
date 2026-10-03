@@ -13,6 +13,10 @@ import httpx
 from app.core.config import settings
 from app.schemas.ai import AiExplanation, ExplainRequest
 
+# Part of the AI cache key: bump whenever SYSTEM_PROMPT or _build_prompt
+# changes so explanations generated from the old prompt aren't reused.
+PROMPT_VERSION = "2"
+
 SYSTEM_PROMPT = (
     "You are a senior security analyst explaining a software dependency "
     "vulnerability to a developer who is NOT a security expert. Be clear, "

@@ -66,7 +66,9 @@ def compute_risk(
     exploit = 25.0 if in_kev else 0.0
     reach_pts = _REACH_POINTS.get(reachability, 10.0)
     fix = 0.0 if vuln.fixed_version else 10.0
-    exposure = 5.0 if (dep.version and not dep.pinned) else 3.0
+    # Any non-exact spec (a range, or no version at all) can float to a
+    # different release than the one we scored — more exposure than a pin.
+    exposure = 3.0 if dep.pinned else 5.0
 
     score = int(round(min(base + exploit + reach_pts + fix + exposure, 100.0)))
     return score, risk_level(score)

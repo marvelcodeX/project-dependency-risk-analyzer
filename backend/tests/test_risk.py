@@ -72,3 +72,16 @@ def test_score_capped_at_100():
     score, level = compute_risk(v, dep, in_kev=True, reachability=reach.REACHABLE)
     assert score == 100
     assert level == "CRITICAL"
+
+
+def test_unversioned_dependency_counts_as_unpinned():
+    # A bare "numpy" can resolve to anything — at least as exposed as a range.
+    bare = Dependency(name="numpy", version=None, pinned=False)
+    ranged = Dependency(name="numpy", version="1.0", pinned=False)
+    pinned = Dependency(name="numpy", version="1.0", pinned=True)
+    v = _vuln(cvss_score=5.0, fixed_version="2.0")
+    s_bare, _ = compute_risk(v, bare, in_kev=False)
+    s_ranged, _ = compute_risk(v, ranged, in_kev=False)
+    s_pinned, _ = compute_risk(v, pinned, in_kev=False)
+    assert s_bare == s_ranged == 35
+    assert s_pinned == 33

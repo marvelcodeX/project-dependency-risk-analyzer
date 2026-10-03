@@ -92,3 +92,56 @@ pytest==7.0.0
     assert "numpy" in names
     assert "django" in names
     assert "pytest" in names
+
+
+def test_environment_marker_is_stripped():
+    deps = parse_requirements_txt('pywin32==306 ; sys_platform == "win32"')
+    assert deps[0].name == "pywin32"
+    assert deps[0].version == "306"
+    assert deps[0].pinned is True
+
+
+def test_hash_pinned_continuation_lines():
+    content = (
+        "flask==2.0.1 \\\n"
+        "    --hash=sha256:aaaa \\\n"
+        "    --hash=sha256:bbbb\n"
+        "requests==2.25.0 --hash=sha256:cccc\n"
+    )
+    deps = parse_requirements_txt(content)
+    assert [(d.name, d.version, d.pinned) for d in deps] == [
+        ("flask", "2.0.1", True),
+        ("requests", "2.25.0", True),
+    ]
+
+
+def test_compatible_release_uses_floor():
+    deps = parse_requirements_txt("django~=4.2.1")
+    assert deps[0].version == "4.2.1"
+    assert deps[0].pinned is False
+
+
+def test_upper_bound_only_has_no_version():
+    deps = parse_requirements_txt("urllib3<2")
+    assert deps[0].version is None
+
+
+def test_not_equal_is_not_a_pin():
+    deps = parse_requirements_txt("idna!=3.0,>=2.5")
+    assert deps[0].version == "2.5"
+    assert deps[0].pinned is False
+
+
+def test_wildcard_equality_is_not_a_pin():
+    deps = parse_requirements_txt("numpy==1.24.*")
+    assert deps[0].version == "1.24"
+    assert deps[0].pinned is False
+
+
+def test_direct_url_reference_keeps_fragment():
+    deps = parse_requirements_txt(
+        "mypkg @ https://example.com/mypkg.zip#sha256=abcd  # vendored"
+    )
+    assert deps[0].name == "mypkg"
+    assert deps[0].version is None
+    assert deps[0].raw_spec.startswith("@ https://example.com/mypkg.zip#sha256")

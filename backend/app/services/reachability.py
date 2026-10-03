@@ -105,9 +105,17 @@ def _import_names_for(pkg: str) -> tuple[set[str], bool]:
     return {norm}, False
 
 
-def classify(pkg: str, imported_modules: set[str], has_source: bool) -> str:
-    """Classify one package's reachability against the analyzed imports."""
-    if not has_source:
+def classify(
+    pkg: str,
+    imported_modules: set[str],
+    has_source: bool,
+    ecosystem: str = "PyPI",
+) -> str:
+    """Classify one package's reachability against the analyzed imports.
+
+    Only Python source is analyzed, so non-PyPI packages are always UNKNOWN.
+    """
+    if not has_source or ecosystem.lower() != "pypi":
         return UNKNOWN
     names, confident = _import_names_for(pkg)
     if names & imported_modules:

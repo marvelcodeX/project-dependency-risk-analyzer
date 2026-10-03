@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { AiStatus, ScanResponse } from './api'
-import { scanText, scanFile, getScan, aiStatus } from './api'
+import { scanText, scanFile, getScan, aiStatus, MANIFEST_FORMATS } from './api'
 import { ScanSummary } from './components/ScanSummary'
 import { ResultsTable } from './components/ResultsTable'
 import { ScanHistory } from './components/ScanHistory'
@@ -12,6 +12,7 @@ numpy`
 
 export default function App() {
   const [text, setText] = useState(SAMPLE)
+  const [format, setFormat] = useState('pasted') // 'pasted' = auto-detect
   const [source, setSource] = useState('')
   const [showSource, setShowSource] = useState(false)
   const [scan, setScan] = useState<ScanResponse | null>(null)
@@ -40,16 +41,17 @@ export default function App() {
     }
   }
 
+  function sourceFiles(): Record<string, string> {
+    return source.trim() ? { 'pasted.py': source } : {}
+  }
+
   function runTextScan() {
-    const sourceFiles: Record<string, string> = source.trim()
-      ? { 'pasted.py': source }
-      : {}
-    void run(scanText(text, 'requirements.txt', sourceFiles))
+    void run(scanText(text, format, sourceFiles()))
   }
 
   function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
-    if (file) void run(scanFile(file))
+    if (file) void run(scanFile(file, sourceFiles()))
     e.target.value = '' // allow re-selecting the same file
   }
 
@@ -83,8 +85,13 @@ export default function App() {
           )}
         </div>
         <p className="mt-1 text-sm text-gray-400">
-          Paste or upload a <code className="text-gray-300">requirements.txt</code>{' '}
-          to scan your Python dependencies for known vulnerabilities (OSV).
+          Paste or upload a dependency manifest —{' '}
+          <code className="text-gray-300">requirements.txt</code>,{' '}
+          <code className="text-gray-300">package.json</code>,{' '}
+          <code className="text-gray-300">package-lock.json</code>,{' '}
+          <code className="text-gray-300">go.mod</code> or{' '}
+          <code className="text-gray-300">pom.xml</code> — to scan for known
+          vulnerabilities (OSV).
         </p>
       </header>
 
@@ -106,11 +113,25 @@ export default function App() {
             {loading ? 'Scanning…' : 'Scan dependencies'}
           </button>
 
+          <select
+            value={format}
+            onChange={(e) => setFormat(e.target.value)}
+            aria-label="Manifest format"
+            className="rounded-lg border border-white/15 bg-[#0b0e14] px-3 py-2 text-sm text-gray-300 outline-none focus:border-violet-500/60"
+          >
+            <option value="pasted">Auto-detect format</option>
+            {MANIFEST_FORMATS.map((f) => (
+              <option key={f} value={f}>
+                {f}
+              </option>
+            ))}
+          </select>
+
           <label className="cursor-pointer rounded-lg border border-white/15 px-4 py-2 text-sm font-medium text-gray-300 transition hover:bg-white/5">
             Upload file
             <input
               type="file"
-              accept=".txt,.text"
+              accept=".txt,.text,.json,.mod,.xml,.pom"
               onChange={onFile}
               className="hidden"
             />
@@ -136,7 +157,8 @@ export default function App() {
             />
             <p className="mt-1 text-xs text-gray-500">
               Pasted code is analyzed locally (AST) to flag which vulnerable
-              packages your project actually imports.
+              packages your project actually imports. Applies to Python
+              (PyPI) dependencies; other ecosystems show as unknown.
             </p>
           </div>
         )}

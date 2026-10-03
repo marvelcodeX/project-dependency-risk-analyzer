@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app import __version__
 from app.api.ai import router as ai_router
 from app.api.scan import router as scan_router
 from app.core.config import settings
@@ -19,7 +20,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Soteria-AI",
     description="AI-Powered Dependency Risk Analyzer",
-    version="0.2.0",
+    version=__version__,
     lifespan=lifespan,
 )
 
@@ -37,4 +38,4 @@ app.include_router(ai_router, prefix="/api")
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "version": "0.2.0"}
+    return {"status": "ok", "version": __version__}

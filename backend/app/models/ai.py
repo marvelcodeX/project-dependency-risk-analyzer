@@ -1,7 +1,14 @@
 """ORM model for cached AI explanations.
 
-Keyed by (vuln_id, model) so the same advisory's explanation is reused across
+Keyed by (vuln_id, model, context_key) so an explanation is reused across
 scans instead of being regenerated every time (plan section 13, caching).
+``context_key`` hashes everything else the prompt depends on (package version,
+reachability, KEV status, ...): the same advisory seen in a different context
+needs a different "project impact" and priority.
+
+The table was renamed from ``ai_explanations`` when context_key was added, so
+``create_all`` builds the new shape without a migration; the old table is just
+a stale cache and can be dropped.
 """
 
 from datetime import datetime, timezone
@@ -17,12 +24,15 @@ def _utcnow() -> datetime:
 
 
 class AiExplanationCache(Base):
-    __tablename__ = "ai_explanations"
-    __table_args__ = (UniqueConstraint("vuln_id", "model", name="uq_vuln_model"),)
+    __tablename__ = "ai_explanation_cache"
+    __table_args__ = (
+        UniqueConstraint("vuln_id", "model", "context_key", name="uq_vuln_model_ctx"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     vuln_id: Mapped[str] = mapped_column(String(100), index=True)
     model: Mapped[str] = mapped_column(String(100))
+    context_key: Mapped[str] = mapped_column(String(64), default="")
 
     summary: Mapped[str] = mapped_column(String, default="")
     attack_scenario: Mapped[str] = mapped_column(String, default="")

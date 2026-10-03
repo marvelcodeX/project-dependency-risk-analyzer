@@ -28,7 +28,8 @@ export function ResultsTable({
   function toggle(key: string) {
     setExpanded((prev) => {
       const next = new Set(prev)
-      next.has(key) ? next.delete(key) : next.add(key)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
       return next
     })
   }
@@ -39,7 +40,8 @@ export function ResultsTable({
     for (const r of scan.results) {
       for (const v of r.vulnerabilities) {
         out.push({
-          key: `${r.dependency.name}-${v.id}`,
+          // Lockfiles can hold one package at several versions.
+          key: `${r.dependency.name}@${r.dependency.version ?? ''}-${v.id}`,
           pkg: r.dependency.name,
           dep: r.dependency,
           version: r.dependency.version,
@@ -102,7 +104,7 @@ export function ResultsTable({
 
             {!onlyVulnerable &&
               cleanDeps.map((r) => (
-                <tr key={`clean-${r.dependency.name}`} className="text-gray-500">
+                <tr key={`clean-${r.dependency.name}@${r.dependency.version ?? ''}`} className="text-gray-500">
                   <td className="px-4 py-2.5" />
                   <td className="px-4 py-2.5 font-mono text-gray-300">
                     {r.dependency.name}
@@ -183,7 +185,7 @@ function VulnRow({
           {!row.pinned && row.version && (
             <span
               className="ml-2 text-xs text-amber-500/80"
-              title="Version not pinned with =="
+              title="Not an exact pin — version is the lower bound of a range"
             >
               unpinned
             </span>

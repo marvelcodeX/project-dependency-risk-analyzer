@@ -4,6 +4,8 @@ httpx>=0.28.0
 pydantic>=2.10.0
 pydantic-settings>=2.6.0
 python-multipart>=0.0.20
+packaging>=24.0           # PEP 440 version comparison (fixed-version matching)
+defusedxml>=0.7.1         # safe parsing of untrusted pom.xml uploads
 
 # Persistence
 sqlalchemy>=2.0.0

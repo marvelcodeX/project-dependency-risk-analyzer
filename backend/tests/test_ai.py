@@ -112,3 +112,56 @@ async def test_explain_returns_503_when_unavailable(monkeypatch):
         )
     assert resp.status_code == 503
     assert "unavailable" in resp.json()["detail"].lower()
+
+
+async def test_cache_is_keyed_by_finding_context(monkeypatch):
+    calls = {"n": 0}
+
+    async def _gen(req):
+        calls["n"] += 1
+        return AiExplanation(
+            summary=f"reach={req.reachability}",
+            attack_scenario="", project_impact="", fix_steps="",
+        )
+
+    monkeypatch.setattr(ollama_client, "generate", _gen)
+    base = {**_req(), "vuln_id": "GHSA-ctx"}
+
+    async with await _client() as ac:
+        a = (await ac.post("/api/ai/explain", json=base)).json()
+        b = (
+            await ac.post(
+                "/api/ai/explain", json={**base, "reachability": "UNREACHABLE"}
+            )
+        ).json()
+        again = (await ac.post("/api/ai/explain", json=base)).json()
+
+    # Different reachability → separate explanation, not the cached one.
+    assert b["cached"] is False
+    assert b["summary"] == "reach=UNREACHABLE"
+    assert again["cached"] is True and again["summary"] == "reach=UNKNOWN"
+    assert a["summary"] == "reach=UNKNOWN"
+    assert calls["n"] == 2
+
+
+async def test_force_regenerates_and_replaces_cache(monkeypatch):
+    version = {"n": 0}
+
+    async def _gen(req):
+        version["n"] += 1
+        return AiExplanation(
+            summary=f"v{version['n']}",
+            attack_scenario="", project_impact="", fix_steps="",
+        )
+
+    monkeypatch.setattr(ollama_client, "generate", _gen)
+    body = {**_req(), "vuln_id": "GHSA-force"}
+
+    async with await _client() as ac:
+        await ac.post("/api/ai/explain", json=body)
+        forced = (await ac.post("/api/ai/explain?force=true", json=body)).json()
+        after = (await ac.post("/api/ai/explain", json=body)).json()
+
+    assert forced["summary"] == "v2" and forced["cached"] is False
+    assert after["cached"] is True
+    assert after["summary"] == "v2"  # the regenerated text was persisted

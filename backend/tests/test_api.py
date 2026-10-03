@@ -26,6 +26,10 @@ async def _fake_query_osv(dep):
     return []
 
 
+async def _fake_query_osv_many(deps):
+    return [await _fake_query_osv(d) for d in deps]
+
+
 async def _fake_kev():
     return {"CVE-2023-30861"}
 
@@ -33,7 +37,7 @@ async def _fake_kev():
 @pytest.fixture(autouse=True)
 async def _setup(monkeypatch):
     await init_db()
-    monkeypatch.setattr(scan_api, "query_osv", _fake_query_osv)
+    monkeypatch.setattr(scan_api, "query_osv_many", _fake_query_osv_many)
     monkeypatch.setattr(scan_api, "get_kev_cve_ids", _fake_kev)
 
 
@@ -105,3 +109,77 @@ async def test_reachability_from_source_raises_risk():
         v_reach = with_src["results"][0]["vulnerabilities"][0]
         assert v_reach["reachability"] == "REACHABLE"
         assert v_reach["risk_score"] > v_unknown["risk_score"]
+
+
+async def test_unsupported_or_broken_manifest_returns_400():
+    async with await _client() as ac:
+        resp = await ac.post(
+            "/api/scan/text",
+            json={"content": "{not json", "filename": "package.json"},
+        )
+        assert resp.status_code == 400
+        assert "Invalid JSON" in resp.json()["detail"]
+
+        resp = await ac.post(
+            "/api/scan/text", json={"content": "x", "filename": "Gemfile.lock"}
+        )
+        assert resp.status_code == 400
+        assert "Unsupported" in resp.json()["detail"]
+
+
+async def test_osv_outage_returns_502_not_empty_results(monkeypatch):
+    async def _down(deps):
+        raise scan_api.OsvError("connection refused")
+
+    monkeypatch.setattr(scan_api, "query_osv_many", _down)
+    async with await _client() as ac:
+        resp = await ac.post("/api/scan/text", json={"content": "flask==2.0.1"})
+    assert resp.status_code == 502
+    assert "OSV" in resp.json()["detail"]
+
+
+async def test_pasted_package_json_is_detected_and_labelled():
+    async with await _client() as ac:
+        data = (
+            await ac.post(
+                "/api/scan/text",
+                json={
+                    "content": '{"dependencies": {"lodash": "^4.17.20"}}',
+                    "filename": "pasted",
+                },
+            )
+        ).json()
+    assert data["filename"] == "package.json"
+    dep = data["results"][0]["dependency"]
+    assert dep["ecosystem"] == "npm"
+    assert dep["version"] == "4.17.20"
+
+
+async def test_upload_rejects_non_utf8_and_accepts_bom():
+    async with await _client() as ac:
+        bad = await ac.post(
+            "/api/scan/file",
+            files={"file": ("requirements.txt", b"\xff\xfe\x00bad", "text/plain")},
+        )
+        assert bad.status_code == 400
+
+        good = await ac.post(
+            "/api/scan/file",
+            files={"file": ("requirements.txt", "\ufeffflask==2.0.1".encode(), "text/plain")},
+        )
+        assert good.status_code == 200
+        assert good.json()["results"][0]["dependency"]["name"] == "flask"
+
+
+async def test_upload_with_source_files_sets_reachability():
+    async with await _client() as ac:
+        resp = await ac.post(
+            "/api/scan/file",
+            files=[
+                ("file", ("requirements.txt", b"flask==2.0.1", "text/plain")),
+                ("source_files", ("app.py", b"import flask\n", "text/x-python")),
+            ],
+        )
+    assert resp.status_code == 200
+    vuln = resp.json()["results"][0]["vulnerabilities"][0]
+    assert vuln["reachability"] == "REACHABLE"

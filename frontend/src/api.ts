@@ -79,21 +79,55 @@ export async function scanText(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ content, filename, source_files: sourceFiles }),
   })
-  if (!res.ok) {
-    throw new Error(`Scan failed (${res.status}): ${await res.text()}`)
-  }
+  if (!res.ok) throw new Error(await errorDetail(res, 'Scan failed'))
   return res.json()
 }
 
-/** Scan an uploaded dependency file. */
-export async function scanFile(file: File): Promise<ScanResponse> {
+/** Prefer FastAPI's `{"detail": ...}` message over a raw JSON body. */
+async function errorDetail(res: Response, prefix: string): Promise<string> {
+  const text = await res.text()
+  try {
+    const detail = JSON.parse(text).detail
+    if (typeof detail === 'string') return `${prefix}: ${detail}`
+  } catch {
+    /* not JSON */
+  }
+  return `${prefix} (${res.status}): ${text}`
+}
+
+/** Manifest formats the backend can parse. 'pasted' = auto-detect. */
+export const MANIFEST_FORMATS = [
+  'requirements.txt',
+  'package.json',
+  'package-lock.json',
+  'go.mod',
+  'pom.xml',
+] as const
+
+/** Scan an uploaded dependency file, optionally with source for reachability. */
+export async function scanFile(
+  file: File,
+  sourceFiles: Record<string, string> = {},
+): Promise<ScanResponse> {
   const form = new FormData()
   form.append('file', file)
-  const res = await fetch('/api/scan/file', { method: 'POST', body: form })
-  if (!res.ok) {
-    throw new Error(`Scan failed (${res.status}): ${await res.text()}`)
+  for (const [name, code] of Object.entries(sourceFiles)) {
+    form.append('source_files', new Blob([code], { type: 'text/x-python' }), name)
   }
+  const res = await fetch('/api/scan/file', { method: 'POST', body: form })
+  if (!res.ok) throw new Error(await errorDetail(res, 'Scan failed'))
   return res.json()
+}
+
+export type ReportFormat = 'json' | 'sarif' | 'cyclonedx' | 'markdown' | 'html'
+
+/** URL of an exported report for a saved scan (served by the backend). */
+export function reportUrl(
+  id: number,
+  format: ReportFormat,
+  download = true,
+): string {
+  return `/api/scans/${id}/report?format=${format}&download=${download}`
 }
 
 /** List previously saved scans, newest first. */
