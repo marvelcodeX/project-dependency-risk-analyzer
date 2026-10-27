@@ -51,3 +51,6 @@ soteria.db
 
 
 /docs
+# Scanner output
+soteria.sarif
+soteria.md

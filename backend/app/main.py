@@ -1,7 +1,9 @@
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app import __version__
 from app.api.ai import router as ai_router
@@ -39,3 +41,8 @@ app.include_router(ai_router, prefix="/api")
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "version": __version__}
+
+
+# Serve the built UI last, so every /api route above takes precedence.
+if settings.static_dir and Path(settings.static_dir).is_dir():
+    app.mount("/", StaticFiles(directory=settings.static_dir, html=True), name="ui")

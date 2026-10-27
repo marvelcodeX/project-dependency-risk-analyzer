@@ -1,0 +1,34 @@
+name: Dependency scan
+
+# Scans this repository's own dependencies with the Soteria-AI action.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 6 * * 1" # weekly: new advisories appear without code changes
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write # upload SARIF to code scanning
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Soteria-AI scan
+        id: soteria
+        uses: ./
+        with:
+          path: backend frontend
+          source: backend
+          fail-on: critical
+      - name: Result
+        if: always()
+        run: >
+          echo "Risk ${{ steps.soteria.outputs.risk-score }}
+          (${{ steps.soteria.outputs.risk-level }}),
+          ${{ steps.soteria.outputs.findings }} findings"

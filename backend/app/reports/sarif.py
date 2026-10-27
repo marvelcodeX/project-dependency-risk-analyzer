@@ -54,7 +54,7 @@ def _result(f: Finding, manifest: str) -> dict:
     fix = f"Upgrade to {v.fixed_version}." if v.fixed_version else "No fixed version published yet."
     kev = " Actively exploited in the wild (CISA KEV)." if v.in_cisa_kev else ""
     fingerprint = hashlib.sha256(
-        f"{dep.ecosystem}|{dep.name}|{dep.version}|{v.id}".encode()
+        f"{manifest}|{dep.ecosystem}|{dep.name}|{dep.version}|{v.id}".encode()
     ).hexdigest()
     return {
         "ruleId": v.id,
@@ -87,12 +87,25 @@ def _result(f: Finding, manifest: str) -> dict:
     }
 
 
-def render_sarif(scan: ScanResponse) -> dict:
-    items = findings(scan)
+def render_sarif(scans: ScanResponse | list[ScanResponse]) -> dict:
+    """Render one or more scans as a single SARIF run.
+
+    Each scan's manifest becomes the location of its results, so a CI scan of
+    several manifests uploads as one run (GitHub code scanning rejects multiple
+    runs from the same tool and category in one file).
+    """
+    if isinstance(scans, ScanResponse):
+        scans = [scans]
     rules: dict[str, dict] = {}
-    for f in items:
-        rules.setdefault(f.vuln.id, _rule(f))
-    manifest = scan.filename or "requirements.txt"
+    results: list[dict] = []
+    for scan in scans:
+        manifest = scan.filename or "requirements.txt"
+        for f in findings(scan):
+            rules.setdefault(f.vuln.id, _rule(f))
+            results.append(_result(f, manifest))
+    results.sort(key=lambda r: -r["properties"]["riskScore"])
+
+    worst = max(scans, key=lambda s: s.risk_score, default=None)
     return {
         "$schema": SARIF_SCHEMA,
         "version": "2.1.0",
@@ -106,13 +119,16 @@ def render_sarif(scan: ScanResponse) -> dict:
                         "rules": list(rules.values()),
                     }
                 },
-                "results": [_result(f, manifest) for f in items],
+                "results": results,
                 "properties": {
-                    "scanId": scan.id,
-                    "riskScore": scan.risk_score,
-                    "riskLevel": scan.risk_level,
-                    "totalDependencies": scan.total_dependencies,
-                    "vulnerableDependencies": scan.vulnerable_dependencies,
+                    "scanIds": [s.id for s in scans if s.id is not None],
+                    "manifests": [s.filename for s in scans],
+                    "riskScore": worst.risk_score if worst else 0,
+                    "riskLevel": worst.risk_level if worst else "NONE",
+                    "totalDependencies": sum(s.total_dependencies for s in scans),
+                    "vulnerableDependencies": sum(
+                        s.vulnerable_dependencies for s in scans
+                    ),
                 },
             }
         ],

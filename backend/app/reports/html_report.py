@@ -76,6 +76,7 @@ def render_html(scan: ScanResponse) -> str:
     when = scan.created_at.strftime("%Y-%m-%d %H:%M UTC") if scan.created_at else "—"
     by_risk = Counter(f.vuln.risk_level for f in items)
     kev = sum(1 for f in items if f.vuln.in_cisa_kev)
+    scan_ref = f" · scan #{scan.id}" if scan.id is not None else ""
 
     cards = [
         (f'<b class="lvl-{e(scan.risk_level)}">{scan.risk_score}</b>',
@@ -141,7 +142,7 @@ def render_html(scan: ScanResponse) -> str:
 <body>
 <main>
 <h1>Dependency risk report</h1>
-<div class="meta"><code>{e(scan.filename)}</code> · scan #{e(str(scan.id))} · {e(when)}</div>
+<div class="meta"><code>{e(scan.filename)}</code>{scan_ref} · {e(when)}</div>
 <div class="cards">{cards_html}</div>
 {kev_html}
 <h2>Findings</h2>

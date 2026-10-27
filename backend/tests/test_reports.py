@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 import httpx
 import pytest
 
-import app.api.scan as scan_api
+import app.services.scanner as scanner_mod
 from app.core.db import init_db
 from app.main import app
 from app.reports import ReportFormat, render_report
@@ -222,8 +222,8 @@ async def _fake_kev():
 @pytest.fixture
 async def scan_id(monkeypatch):
     await init_db()
-    monkeypatch.setattr(scan_api, "query_osv_many", _fake_many)
-    monkeypatch.setattr(scan_api, "get_kev_cve_ids", _fake_kev)
+    monkeypatch.setattr(scanner_mod, "query_osv_many", _fake_many)
+    monkeypatch.setattr(scanner_mod, "get_kev_cve_ids", _fake_kev)
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as ac:

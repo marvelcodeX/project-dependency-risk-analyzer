@@ -27,6 +27,7 @@ Soteria-AI scans your project's dependencies for known vulnerabilities and uses 
 - 💾 **Scan History** — Every scan is persisted and reloadable (SQLite by default, PostgreSQL-ready)
 - 🖥️ **Web UI** — React dashboard: risk banner, severity tiles, findings table, history sidebar
 - 📄 **Report Export** — JSON, SARIF 2.1.0 (GitHub code scanning), CycloneDX 1.5 SBOM with vulnerabilities, Markdown (PR comments), and a printable HTML report (Print → Save as PDF)
+- ⚙️ **CI/CD** — CLI + GitHub Action that fails builds on a risk threshold and uploads SARIF; Docker image published to GHCR on release tags
 
 **Planned**
 
@@ -103,7 +104,76 @@ CVSS + CISA KEV (exploited-in-the-wild) + **reachability** + fix availability.
 `REACHABLE` / `UNREACHABLE` / `POTENTIALLY_REACHABLE` / `UNKNOWN`, and unreachable ones are
 deprioritized to cut noise.
 
-### Uploading results to GitHub code scanning
+## CI / CD
+
+### GitHub Action
+
+Scan any repository on every push/PR, upload findings to the **Security → Code scanning**
+tab, add a Markdown report to the run summary, and fail the job above a risk threshold:
+
+```yaml
+# .github/workflows/soteria.yml
+on: [push, pull_request]
+permissions:
+  contents: read
+  security-events: write          # SARIF upload
+jobs:
+  scan:
+    runs-on: ubuntu-latest        # Linux or macOS runners
+    steps:
+      - uses: actions/checkout@v5
+      - uses: marvelcodeX/project-dependency-risk-analyzer@v0.4.0
+        with:
+          path: .                 # manifests or directories (space-separated)
+          source: src             # optional: Python dirs for reachability
+          fail-on: high           # critical | high | medium | low | none
+```
+
+Outputs: `risk-score`, `risk-level`, `findings`, `failed`, `sarif-file`. SARIF upload is
+skipped automatically on pull requests from forks (no write token there).
+
+### Command line
+
+The same scanner runs anywhere (GitLab, Jenkins, pre-commit, locally). It needs only the
+slim `requirements-cli.txt` and stores nothing:
+
+```bash
+pip install -r backend/requirements-cli.txt
+PYTHONPATH=backend python -m app.cli scan . --source backend --fail-on high \
+  -o sarif=soteria.sarif -o markdown=soteria.md -o cyclonedx=sbom.cdx.json
+```
+
+Directories are searched recursively for manifests, skipping `node_modules`, virtualenvs,
+`.git`, `dist`/`build`, etc.; a `package.json` is skipped when a lockfile sits next to it.
+`-o FORMAT=-` writes to stdout. Exit codes: **0** pass, **1** threshold met, **2** error
+(including OSV being unreachable — a scan never silently passes).
+
+### This repository's pipelines
+
+| Workflow | Trigger | Does |
+|---|---|---|
+| `ci.yml` | push to `main`, PRs | backend tests (Python 3.11–3.13), CLI minimal-install check, frontend lint + build, Docker build + smoke test |
+| `dependency-scan.yml` | push, PRs, weekly | scans this repo with the action (`fail-on: critical`) and uploads SARIF |
+| `release.yml` | tag `vX.Y.Z` | checks the tag matches `app.__version__`, runs tests, pushes a multi-arch image to GHCR, creates a GitHub release |
+
+To release: bump `__version__` in `backend/app/__init__.py`, commit, then
+`git tag v0.4.0 && git push origin v0.4.0`.
+
+### Docker
+
+One image serves the API and the built UI on port 8000:
+
+```bash
+docker build -t soteria-ai .
+docker run -p 8000:8000 -v soteria-data:/data soteria-ai
+# or the published image:
+docker run -p 8000:8000 -v soteria-data:/data ghcr.io/marvelcodex/project-dependency-risk-analyzer:latest
+```
+
+Data lives in the `/data` volume (SQLite). Use `-e DATABASE_URL=postgresql+asyncpg://…` for
+Postgres and `-e OLLAMA_URL=http://host.docker.internal:11434` for AI explanations.
+
+### Uploading an API scan to code scanning manually
 
 ```bash
 curl -o soteria.sarif "http://localhost:8000/api/scans/<id>/report?format=sarif"
@@ -134,7 +204,8 @@ Override defaults via env vars: `OLLAMA_URL` (default `http://localhost:11434`) 
 > - **Phase 3 (Reachability)** — ✅ Python AST import analysis; findings tagged reachable/unreachable and risk-scored accordingly
 > - **Phase 4 (Multi-ecosystem)** — ✅ npm (`package.json`, `package-lock.json`), Go (`go.mod`), Maven (`pom.xml`); branch-aware fix versions; concurrent OSV lookups
 > - **Phase 5 (Reports)** — ✅ JSON / SARIF / CycloneDX SBOM / Markdown / printable HTML export
-> - **Phase 6+ (richer dashboard, more ecosystems)** — not started
+> - **Phase 6 (CI/CD)** — ✅ CLI + GitHub Action (threshold gating, SARIF upload, job summary); CI, self-scan and GHCR release workflows; single Docker image
+> - **Phase 7+ (richer dashboard, more ecosystems)** — not started
 
 
 ## License

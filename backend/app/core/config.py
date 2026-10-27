@@ -33,5 +33,9 @@ class Settings(BaseSettings):
     # LLM calls are slow; give them a generous timeout.
     ollama_timeout: float = 120.0
 
+    # Built frontend (frontend/dist) to serve from "/". Empty in development,
+    # where Vite serves the UI; set in the Docker image.
+    static_dir: str = ""
+
 
 settings = Settings()

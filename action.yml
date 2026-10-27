@@ -1,0 +1,133 @@
+name: Soteria-AI dependency scan
+description: >
+  Scan dependency manifests (requirements.txt, package.json, package-lock.json,
+  go.mod, pom.xml) for known vulnerabilities, score them with CVSS + CISA KEV +
+  reachability, upload SARIF to code scanning, and fail on a risk threshold.
+author: Soteria-AI
+branding:
+  icon: shield
+  color: purple
+
+inputs:
+  path:
+    description: Space-separated manifests or directories to scan.
+    default: "."
+  source:
+    description: >
+      Space-separated Python source directories for import-reachability
+      analysis. Empty disables it (findings are scored as UNKNOWN reachability).
+    default: ""
+  fail-on:
+    description: Fail when any finding's risk level is at or above this (critical, high, medium, low, none).
+    default: high
+  sarif-file:
+    description: Where to write the SARIF report.
+    default: soteria.sarif
+  upload-sarif:
+    description: >
+      Upload the SARIF report to GitHub code scanning. Needs
+      `permissions: security-events: write` (unavailable on pull requests from forks).
+    default: "true"
+  sarif-category:
+    description: Code scanning category, to keep separate scans apart.
+    default: soteria
+  job-summary:
+    description: Add a Markdown report to the workflow run summary.
+    default: "true"
+  python-version:
+    description: Python version used to run the scanner.
+    default: "3.12"
+
+outputs:
+  risk-score:
+    description: Highest composite risk score (0-100) across all findings.
+    value: ${{ steps.scan.outputs.risk-score }}
+  risk-level:
+    description: Overall risk level (CRITICAL, HIGH, MEDIUM, LOW, NONE).
+    value: ${{ steps.scan.outputs.risk-level }}
+  findings:
+    description: Number of findings.
+    value: ${{ steps.scan.outputs.findings }}
+  failed:
+    description: Whether the fail-on threshold was met.
+    value: ${{ steps.scan.outputs.failed }}
+  sarif-file:
+    description: Path of the SARIF report.
+    value: ${{ inputs.sarif-file }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v6
+      with:
+        python-version: ${{ inputs.python-version }}
+        update-environment: false
+      id: python
+
+    - name: Install scanner
+      shell: bash
+      run: |
+        "${{ steps.python.outputs.python-path }}" -m venv "$RUNNER_TEMP/soteria-venv"
+        "$RUNNER_TEMP/soteria-venv/bin/pip" install --quiet --disable-pip-version-check \
+          -r "$GITHUB_ACTION_PATH/backend/requirements-cli.txt"
+
+    - name: Scan dependencies
+      id: scan
+      shell: bash
+      env:
+        PYTHONPATH: ${{ github.action_path }}/backend
+        INPUT_PATH: ${{ inputs.path }}
+        INPUT_SOURCE: ${{ inputs.source }}
+        INPUT_FAIL_ON: ${{ inputs.fail-on }}
+        INPUT_SARIF: ${{ inputs.sarif-file }}
+      run: |
+        # Inputs arrive via env (never interpolated into the script) so a
+        # crafted input can't inject shell commands.
+        read -r -a paths <<< "$INPUT_PATH"
+        args=(scan "${paths[@]}" --fail-on "$INPUT_FAIL_ON"
+              -o "sarif=$INPUT_SARIF" -o "markdown=$RUNNER_TEMP/soteria-summary.md")
+        if [ -n "$INPUT_SOURCE" ]; then
+          read -r -a sources <<< "$INPUT_SOURCE"
+          for s in "${sources[@]}"; do args+=(--source "$s"); done
+        fi
+        set +e
+        "$RUNNER_TEMP/soteria-venv/bin/python" -m app.cli "${args[@]}"
+        code=$?
+        set -e
+        # 1 = threshold met (enforced by the last step, after the uploads).
+        # Python also exits 1 on a crash, so only trust it if the scanner
+        # finished and reported failed=true; anything else is an error.
+        if [ "$code" -eq 1 ] && ! grep -qx 'failed=true' "$GITHUB_OUTPUT"; then
+          echo "::error title=Soteria-AI::Scanner crashed (exit 1); see log above."
+          exit 2
+        fi
+        if [ "$code" -ne 0 ] && [ "$code" -ne 1 ]; then exit "$code"; fi
+        echo "exit-code=$code" >> "$GITHUB_OUTPUT"
+
+    - name: Write job summary
+      if: inputs.job-summary == 'true'
+      shell: bash
+      run: |
+        if [ -f "$RUNNER_TEMP/soteria-summary.md" ]; then
+          cat "$RUNNER_TEMP/soteria-summary.md" >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+    - name: Upload SARIF to code scanning
+      if: >-
+        inputs.upload-sarif == 'true'
+        && (github.event_name != 'pull_request'
+            || github.event.pull_request.head.repo.full_name == github.repository)
+      uses: github/codeql-action/upload-sarif@v4
+      with:
+        sarif_file: ${{ inputs.sarif-file }}
+        category: ${{ inputs.sarif-category }}
+
+    - name: Enforce fail-on threshold
+      if: steps.scan.outputs.exit-code == '1'
+      shell: bash
+      env:
+        INPUT_FAIL_ON: ${{ inputs.fail-on }}
+        LEVEL: ${{ steps.scan.outputs.risk-level }}
+      run: |
+        echo "::error title=Soteria-AI::Dependency risk $LEVEL meets the fail-on threshold ($INPUT_FAIL_ON)."
+        exit 1

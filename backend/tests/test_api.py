@@ -4,6 +4,7 @@ import httpx
 import pytest
 
 import app.api.scan as scan_api
+import app.services.scanner as scanner_mod
 from app.core.db import init_db
 from app.main import app
 from app.schemas.scan import Vulnerability
@@ -37,8 +38,8 @@ async def _fake_kev():
 @pytest.fixture(autouse=True)
 async def _setup(monkeypatch):
     await init_db()
-    monkeypatch.setattr(scan_api, "query_osv_many", _fake_query_osv_many)
-    monkeypatch.setattr(scan_api, "get_kev_cve_ids", _fake_kev)
+    monkeypatch.setattr(scanner_mod, "query_osv_many", _fake_query_osv_many)
+    monkeypatch.setattr(scanner_mod, "get_kev_cve_ids", _fake_kev)
 
 
 async def _client() -> httpx.AsyncClient:
@@ -131,7 +132,7 @@ async def test_osv_outage_returns_502_not_empty_results(monkeypatch):
     async def _down(deps):
         raise scan_api.OsvError("connection refused")
 
-    monkeypatch.setattr(scan_api, "query_osv_many", _down)
+    monkeypatch.setattr(scanner_mod, "query_osv_many", _down)
     async with await _client() as ac:
         resp = await ac.post("/api/scan/text", json={"content": "flask==2.0.1"})
     assert resp.status_code == 502
@@ -183,3 +184,20 @@ async def test_upload_with_source_files_sets_reachability():
     assert resp.status_code == 200
     vuln = resp.json()["results"][0]["vulnerabilities"][0]
     assert vuln["reachability"] == "REACHABLE"
+
+
+def test_dedupe_advisories_merges_aliases():
+    from app.services.scanner import dedupe_advisories
+
+    ghsa = Vulnerability(id="GHSA-a", summary="x", aliases=["CVE-1"], cvss_score=7.5)
+    pysec = Vulnerability(id="PYSEC-1", summary="x", aliases=["GHSA-a", "CVE-1"],
+                          fixed_version="2.0")
+    other = Vulnerability(id="GHSA-b", summary="y", aliases=["CVE-2"])
+    # Linked only through a shared CVE.
+    cve_twin = Vulnerability(id="PYSEC-2", summary="y", aliases=["CVE-2"])
+
+    out = {v.id: v for v in dedupe_advisories([pysec, ghsa, other, cve_twin])}
+    assert set(out) == {"GHSA-a", "GHSA-b"}
+    assert out["GHSA-a"].aliases == ["CVE-1", "PYSEC-1"]
+    assert out["GHSA-a"].fixed_version == "2.0"  # borrowed from the duplicate
+    assert out["GHSA-b"].aliases == ["CVE-2", "PYSEC-2"]
