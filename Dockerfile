@@ -4,7 +4,7 @@
 # Local LLM (optional): -e OLLAMA_URL=http://host.docker.internal:11434
 
 # ---- frontend build ----------------------------------------------------------
-FROM node:22-alpine AS frontend
+FROM node:26-alpine AS frontend
 WORKDIR /src
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --no-audit --no-fund
