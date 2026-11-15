@@ -22,12 +22,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from app import __version__
-from app.parsers import ManifestError
+from app.parsers import SUPPORTED_FORMATS, ManifestError, format_from_filename
 from app.reports import ReportFormat, render_report
 from app.reports.common import findings
 from app.reports.sarif import render_sarif
 from app.schemas.scan import ScanResponse
 from app.services.osv_client import OsvError
+from app.services.reachability import is_source_file
 from app.services.risk import risk_level
 from app.services.scanner import scan_manifest
 
@@ -55,14 +56,8 @@ class CliError(Exception):
 
 
 def _is_manifest(path: Path) -> bool:
-    name = path.name.lower()
-    if name in ("package-lock.json", "npm-shrinkwrap.json", "go.mod", "pom.xml"):
-        return True
-    if name.endswith(".txt") and (
-        name.startswith("requirements") or path.parent.name == "requirements"
-    ):
-        return True
-    return name == "package.json"
+    # Same rule the parsers use, so new formats are discovered automatically.
+    return format_from_filename(path.as_posix()) is not None
 
 
 def _walk(root: Path):
@@ -105,14 +100,14 @@ def discover_manifests(paths: list[Path]) -> list[Path]:
 
 
 def collect_sources(dirs: list[Path]) -> dict[str, str]:
-    """Read Python files under ``dirs`` for import-reachability analysis."""
+    """Read Python and JS/TS files under ``dirs`` for reachability analysis."""
     sources: dict[str, str] = {}
     total = 0
     for d in dirs:
         if not d.is_dir():
             raise CliError(f"--source must be a directory: {d}")
         for f in _walk(d):
-            if f.suffix != ".py":
+            if not is_source_file(f.name):
                 continue
             try:
                 size = f.stat().st_size
@@ -268,7 +263,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     scan.add_argument(
         "--source", action="append", type=Path, default=[], metavar="DIR",
-        help="Python source directory for reachability analysis (repeatable)",
+        help="source directory (Python, JS/TS) for reachability analysis (repeatable)",
     )
     scan.add_argument(
         "-o", "--output", action="append", type=parse_output, default=[],
@@ -307,8 +302,7 @@ def _main(argv: list[str] | None) -> int:
         manifests = discover_manifests(args.paths)
         if not manifests:
             raise CliError(
-                "No supported manifests found (requirements*.txt, package.json, "
-                "package-lock.json, go.mod, pom.xml)"
+                f"No supported manifests found ({', '.join(SUPPORTED_FORMATS)})"
             )
         sources = collect_sources(args.source)
         scans = asyncio.run(scan_all(manifests, sources))

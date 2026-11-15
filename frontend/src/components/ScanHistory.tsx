@@ -1,61 +1,48 @@
-import { useEffect, useState } from 'react'
 import type { ScanListItem } from '../api'
-import { listScans } from '../api'
-import { riskTextClass } from '../severity'
+import { TONE_BG, riskMeta } from '../severity'
 
-interface Props {
-  // Bumping this value triggers a reload (e.g. after a new scan completes).
-  refreshKey: number
+export function ScanHistory({
+  items,
+  activeId,
+  onSelect,
+}: {
+  items: ScanListItem[]
   activeId: number | null
   onSelect: (id: number) => void
-}
-
-export function ScanHistory({ refreshKey, activeId, onSelect }: Props) {
-  const [items, setItems] = useState<ScanListItem[]>([])
-
-  useEffect(() => {
-    listScans()
-      .then(setItems)
-      .catch(() => setItems([]))
-  }, [refreshKey])
-
+}) {
   if (items.length === 0) return null
-
   return (
-    <div className="rounded-xl border border-white/10">
-      <h2 className="border-b border-white/10 bg-white/[0.02] px-4 py-2.5 text-sm font-semibold text-gray-200">
-        Recent scans <span className="text-gray-500">({items.length})</span>
+    <nav aria-label="Recent scans" className="rounded-xl border border-line bg-surface">
+      <h2 className="border-b border-line px-4 py-2.5 text-sm font-semibold text-ink">
+        Recent scans <span className="font-normal text-muted">({items.length})</span>
       </h2>
-      <ul className="divide-y divide-white/5">
-        {items.map((s) => (
-          <li key={s.id}>
-            <button
-              onClick={() => onSelect(s.id)}
-              className={`flex w-full items-center justify-between px-4 py-2.5 text-left text-sm transition hover:bg-white/[0.03] ${
-                s.id === activeId ? 'bg-white/[0.04]' : ''
-              }`}
-            >
-              <span className="min-w-0">
-                <span className="block truncate font-mono text-gray-300">
-                  {s.filename}
-                </span>
-                <span className="text-xs text-gray-500">
-                  {new Date(s.created_at).toLocaleString()} ·{' '}
-                  {s.vulnerable_dependencies}/{s.total_dependencies} vulnerable
-                </span>
-              </span>
-              <span
-                className={`ml-3 shrink-0 text-sm font-semibold tabular-nums ${riskTextClass(
-                  s.risk_level,
-                )}`}
-                title={`Risk ${s.risk_level}`}
+      <ul className="max-h-[70vh] divide-y divide-line overflow-y-auto">
+        {items.map((s) => {
+          const meta = riskMeta(s.risk_level)
+          return (
+            <li key={s.id}>
+              <button
+                onClick={() => onSelect(s.id)}
+                aria-current={s.id === activeId ? 'true' : undefined}
+                className={`flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left text-sm transition hover:bg-surface-2 ${
+                  s.id === activeId ? 'bg-surface-2' : ''
+                }`}
               >
-                {s.risk_score}
-              </span>
-            </button>
-          </li>
-        ))}
+                <span className="min-w-0">
+                  <span className="block truncate font-mono text-ink">{s.filename}</span>
+                  <span className="text-xs text-muted">
+                    {new Date(s.created_at).toLocaleString()} · {s.total_findings} findings
+                  </span>
+                </span>
+                <span className="flex shrink-0 items-center gap-1.5" title={`Risk ${s.risk_level}`}>
+                  <span aria-hidden className={`h-2 w-2 rounded-full ${TONE_BG[meta.tone]}`} />
+                  <span className="text-sm font-semibold tabular-nums text-ink">{s.risk_score}</span>
+                </span>
+              </button>
+            </li>
+          )
+        })}
       </ul>
-    </div>
+    </nav>
   )
 }

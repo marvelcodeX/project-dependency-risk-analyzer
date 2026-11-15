@@ -1,0 +1,38 @@
+name: Bug report
+description: Something doesn't work as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Security issue?** Please don't file it here — use the Security tab → "Report a vulnerability".
+        Please don't paste proprietary manifests or source; a minimal example is best.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: A minimal manifest snippet (requirements.txt, package-lock.json, …) or CLI command.
+      render: text
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where
+      options: [Web UI, API, CLI, GitHub Action, Docker image, Reports / export]
+      multiple: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: From `GET /api/health`, `python -m app.cli --version`, or the image tag.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / error output
+      render: text

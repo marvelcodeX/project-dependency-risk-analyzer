@@ -14,7 +14,14 @@ from app.parsers.npm import parse_package_json, parse_package_lock
 from app.parsers.requirements import parse_requirements_txt
 from app.schemas.scan import Dependency
 
-__all__ = ["ManifestError", "SUPPORTED_FORMATS", "detect_format", "parse_manifest"]
+__all__ = [
+    "ManifestError",
+    "FORMAT_ECOSYSTEMS",
+    "SUPPORTED_FORMATS",
+    "detect_format",
+    "format_from_filename",
+    "parse_manifest",
+]
 
 Parser = Callable[[str], list[Dependency]]
 
@@ -29,19 +36,45 @@ _PARSERS: dict[str, Parser] = {
 
 SUPPORTED_FORMATS = tuple(_PARSERS)
 
+# Format id → OSV ecosystem it yields (served by GET /api/ecosystems).
+FORMAT_ECOSYSTEMS: dict[str, str] = {
+    "requirements.txt": "PyPI",
+    "package.json": "npm",
+    "package-lock.json": "npm",
+    "go.mod": "Go",
+    "pom.xml": "Maven",
+}
+assert set(FORMAT_ECOSYSTEMS) == set(_PARSERS), "every parser needs an ecosystem"
 
-def detect_format(filename: str, content: str) -> str:
-    """Return the format id for a manifest, by name first, then by content."""
-    base = os.path.basename(filename or "").lower()
+
+def format_from_filename(filename: str) -> str | None:
+    """Format id recognised from the file name alone, or ``None``.
+
+    The single source of truth for which files count as manifests: the CLI's
+    directory discovery uses it too, so a newly registered parser is picked up
+    everywhere at once.
+    """
+    path = (filename or "").replace("\\", "/")
+    base = os.path.basename(path).lower()
+    parent = os.path.basename(os.path.dirname(path)).lower()
     if base in _PARSERS:
         return base
     # Common variants: requirements-dev.txt, requirements/base.txt, *.pom ...
-    if base.endswith(".txt") and "requirements" in base:
+    if base.endswith(".txt") and ("requirements" in base or parent == "requirements"):
         return "requirements.txt"
     if base.endswith(".pom"):
         return "pom.xml"
     if base == "npm-shrinkwrap.json":
         return "package-lock.json"
+    return None
+
+
+def detect_format(filename: str, content: str) -> str:
+    """Return the format id for a manifest, by name first, then by content."""
+    by_name = format_from_filename(filename)
+    if by_name:
+        return by_name
+    base = os.path.basename(filename or "").lower()
 
     head = content.lstrip()[:2000]
     if head.startswith("{"):

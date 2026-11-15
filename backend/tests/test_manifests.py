@@ -235,3 +235,88 @@ def test_detect_format_unsupported():
 def test_parse_manifest_dispatches():
     deps = parse_manifest("module x\nrequire a.com/b v1.0.0\n", "go.mod")
     assert deps[0].ecosystem == "Go"
+
+
+# ---- dependency graph ------------------------------------------------------
+
+
+def test_package_lock_v3_graph_direct_depth_and_edges():
+    content = """{
+      "lockfileVersion": 3,
+      "packages": {
+        "": {"name": "app", "dependencies": {"express": "^4"},
+             "devDependencies": {"debug": "^4"}},
+        "node_modules/express": {"version": "4.18.2",
+             "dependencies": {"body-parser": "1.20.1", "debug": "2.6.9"}},
+        "node_modules/express/node_modules/debug": {"version": "2.6.9",
+             "dependencies": {"ms": "2.0.0"}},
+        "node_modules/body-parser": {"version": "1.20.1",
+             "dependencies": {"debug": "2.6.9", "ms": "2.0.0"}},
+        "node_modules/body-parser/node_modules/debug": {"version": "2.6.9",
+             "dependencies": {"ms": "2.0.0"}},
+        "node_modules/debug": {"version": "4.3.4", "dependencies": {"ms": "2.1.2"}},
+        "node_modules/ms": {"version": "2.1.2"},
+        "node_modules/express/node_modules/ms": {"version": "2.0.0"},
+        "node_modules/body-parser/node_modules/ms": {"version": "2.0.0"}
+      }
+    }"""
+    deps = {d.key: d for d in parse_package_lock(content)}
+
+    assert deps["express@4.18.2"].direct is True and deps["express@4.18.2"].depth == 0
+    assert deps["debug@4.3.4"].direct is True  # devDependency of the root
+    assert deps["body-parser@1.20.1"].direct is False
+    assert deps["body-parser@1.20.1"].depth == 1
+    # Nested copies resolve to their nearest node_modules, merged per version.
+    assert deps["debug@2.6.9"].depth == 1
+    assert deps["ms@2.0.0"].depth == 2
+    assert deps["ms@2.1.2"].depth == 1  # under the hoisted debug@4
+    assert deps["express@4.18.2"].depends_on == ["body-parser@1.20.1", "debug@2.6.9"]
+    assert deps["debug@4.3.4"].depends_on == ["ms@2.1.2"]
+
+
+def test_package_lock_workspaces_count_as_roots():
+    content = """{
+      "lockfileVersion": 3,
+      "packages": {
+        "": {"name": "mono", "workspaces": ["packages/*"]},
+        "packages/web": {"name": "web", "dependencies": {"react": "^18"}},
+        "node_modules/web": {"link": true, "resolved": "packages/web"},
+        "node_modules/react": {"version": "18.2.0", "dependencies": {"loose-envify": "^1"}},
+        "node_modules/loose-envify": {"version": "1.4.0"}
+      }
+    }"""
+    deps = {d.key: d for d in parse_package_lock(content)}
+    assert set(deps) == {"react@18.2.0", "loose-envify@1.4.0"}
+    assert deps["react@18.2.0"].direct is True
+    assert deps["loose-envify@1.4.0"].depth == 1
+
+
+def test_package_lock_v1_has_edges_but_unknown_directness():
+    content = """{
+      "lockfileVersion": 1,
+      "dependencies": {
+        "a": {"version": "1.0.0", "requires": {"b": "^2"}},
+        "b": {"version": "2.0.0"}
+      }
+    }"""
+    deps = {d.key: d for d in parse_package_lock(content)}
+    assert deps["a@1.0.0"].depends_on == ["b@2.0.0"]
+    assert deps["a@1.0.0"].direct is None and deps["a@1.0.0"].depth is None
+
+
+def test_go_mod_marks_indirect_modules():
+    deps = _by_name(parse_go_mod(GO_MOD))
+    assert deps["github.com/gin-gonic/gin"].direct is True
+    assert deps["golang.org/x/net"].direct is False  # "// indirect"
+    assert deps["golang.org/x/net"].depth is None
+
+
+def test_pom_dependency_management_is_not_direct():
+    deps = _by_name(parse_pom_xml(POM))
+    assert deps["junit:junit"].direct is True
+    assert deps["org.yaml:snakeyaml"].direct is False
+
+
+def test_package_json_deps_are_direct():
+    deps = parse_package_json('{"dependencies": {"lodash": "^4.17.20"}}')
+    assert deps[0].direct is True and deps[0].depth == 0

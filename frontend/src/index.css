@@ -1,13 +1,109 @@
 @import 'tailwindcss';
 
-html {
+/*
+ * Design tokens. Components use only these (bg-surface, text-ink, …), never
+ * raw colors, so light/dark is defined in one place. Values follow the
+ * dataviz reference palette: chrome + ink, the fixed status scale, and
+ * series-1 for single-series charts.
+ *
+ * Theme selection: OS preference by default; a manual choice sets
+ * <html data-theme="light|dark">, which wins in both directions.
+ */
+:root {
+  color-scheme: light;
+  --page: #f9f9f7;
+  --surface: #fcfcfb;
+  --surface-2: #f2f1ed;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --muted: #6f6d68;
+  --line: rgba(11, 11, 11, 0.1);
+  --grid: #e1e0d9;
+  --baseline: #c3c2b7;
+  --accent: #6250d6;
+  --accent-ink: #ffffff;
+  --series-1: #2a78d6;
+  --good-ink: #006300;
+
+  /* Status scale (fixed, never themed — always shipped with a label). */
+  --critical: #d03b3b;
+  --serious: #ec835a;
+  --warning: #fab219;
+  --good: #0ca30c;
+  --low: #86b6ef;
+  --unknown: #898781;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme='light'])) {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --surface-2: #232322;
+    --ink: #f0efec;
+    --ink-2: #c3c2b7;
+    --muted: #9a988f;
+    --line: rgba(255, 255, 255, 0.1);
+    --grid: #2c2c2a;
+    --baseline: #383835;
+    --accent: #9085e9;
+    --accent-ink: #0b0b0b;
+    --series-1: #3987e5;
+    --good-ink: #0ca30c;
+    --low: #3987e5;
+  }
+}
+
+:root[data-theme='dark'] {
   color-scheme: dark;
+  --page: #0d0d0d;
+  --surface: #1a1a19;
+  --surface-2: #232322;
+  --ink: #f0efec;
+  --ink-2: #c3c2b7;
+  --muted: #9a988f;
+  --line: rgba(255, 255, 255, 0.1);
+  --grid: #2c2c2a;
+  --baseline: #383835;
+  --accent: #9085e9;
+  --accent-ink: #0b0b0b;
+  --series-1: #3987e5;
+  --good-ink: #0ca30c;
+  --low: #3987e5;
+}
+
+@theme inline {
+  --color-page: var(--page);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-grid: var(--grid);
+  --color-baseline: var(--baseline);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-series-1: var(--series-1);
+  --color-good-ink: var(--good-ink);
+  --color-critical: var(--critical);
+  --color-serious: var(--serious);
+  --color-warning: var(--warning);
+  --color-good: var(--good);
+  --color-low: var(--low);
+  --color-unknown: var(--unknown);
 }
 
 body {
   margin: 0;
-  font-family: system-ui, 'Segoe UI', Roboto, sans-serif;
-  background-color: #0b0e14;
-  color: #e5e7eb;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  background-color: var(--page);
+  color: var(--ink);
   -webkit-font-smoothing: antialiased;
+}
+
+/* Visible keyboard focus everywhere, in the accent color. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }

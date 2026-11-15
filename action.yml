@@ -14,7 +14,7 @@ inputs:
     default: "."
   source:
     description: >
-      Space-separated Python source directories for import-reachability
+      Space-separated source directories (Python, JS/TS) for import-reachability
       analysis. Empty disables it (findings are scored as UNKNOWN reachability).
     default: ""
   fail-on:

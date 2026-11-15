@@ -85,3 +85,27 @@ def test_unversioned_dependency_counts_as_unpinned():
     s_pinned, _ = compute_risk(v, pinned, in_kev=False)
     assert s_bare == s_ranged == 35
     assert s_pinned == 33
+
+
+def test_depth_component_follows_plan():
+    v = _vuln(cvss_score=5.0, fixed_version="2.0")
+    base = 20 + 10  # CVSS 5.0 → 20, UNKNOWN reachability → 10
+
+    def score(**kw):
+        return compute_risk(v, Dependency(name="x", version="1", pinned=True, **kw), False)[0]
+
+    assert score(direct=True, depth=0) == base + 5
+    assert score(direct=False, depth=1) == base + 3
+    assert score(direct=False, depth=2) == base + 3
+    assert score(direct=False, depth=5) == base + 1
+    assert score(direct=False, depth=None) == base + 3  # e.g. go.mod "// indirect"
+    assert score() == base + 3  # unknown graph → exposure fallback (pinned)
+
+
+def test_public_exploit_tier_below_kev():
+    dep = Dependency(name="x", version="1", pinned=True)
+    plain = compute_risk(_vuln(cvss_score=5.0), dep, False)[0]
+    poc = compute_risk(_vuln(cvss_score=5.0, has_public_exploit=True), dep, False)[0]
+    kev = compute_risk(_vuln(cvss_score=5.0, has_public_exploit=True), dep, True)[0]
+    assert poc - plain == 20
+    assert kev - plain == 25  # KEV wins; tiers don't stack

@@ -31,7 +31,9 @@ def _rule(f: Finding) -> dict:
     v = f.vuln
     sev = normalized_severity(v)
     score = v.cvss_score if v.cvss_score is not None else _SEVERITY_SCORE.get(sev)
-    props: dict = {"tags": ["security", "dependency", f.dep.ecosystem]}
+    # "external/cwe/cwe-79" is the tag form GitHub code scanning recognizes.
+    cwe_tags = [f"external/cwe/{c.lower()}" for c in v.cwe_ids]
+    props: dict = {"tags": ["security", "dependency", f.dep.ecosystem, *cwe_tags]}
     if score is not None:
         props["security-severity"] = f"{score:.1f}"
     help_uri = v.references[0] if v.references else osv_url(v.id)
@@ -82,7 +84,11 @@ def _result(f: Finding, manifest: str) -> dict:
             "riskScore": v.risk_score,
             "riskLevel": v.risk_level,
             "inCisaKev": v.in_cisa_kev,
+            "hasPublicExploit": v.has_public_exploit,
+            "cweIds": v.cwe_ids,
             "reachability": v.reachability,
+            "direct": dep.direct,
+            "depth": dep.depth,
         },
     }
 

@@ -65,9 +65,9 @@ async def _db():
 
 async def test_status_reports_unavailable(monkeypatch):
     async def _no():
-        return False
+        return False, "Ollama not reachable"
 
-    monkeypatch.setattr(ollama_client, "is_available", _no)
+    monkeypatch.setattr(ollama_client, "check_status", _no)
     async with await _client() as ac:
         data = (await ac.get("/api/ai/status")).json()
     assert data["available"] is False
@@ -165,3 +165,58 @@ async def test_force_regenerates_and_replaces_cache(monkeypatch):
     assert forced["summary"] == "v2" and forced["cached"] is False
     assert after["cached"] is True
     assert after["summary"] == "v2"  # the regenerated text was persisted
+
+
+# ---- model presence (a running server without the model is not "available") --
+
+
+def _tags_transport(models):
+    def handler(request):
+        return httpx.Response(200, json={"models": [{"name": m} for m in models]})
+    return httpx.MockTransport(handler)
+
+
+@pytest.mark.parametrize(
+    ("installed", "wanted", "ok"),
+    [
+        (["mistral:latest"], "mistral", True),
+        (["mistral:latest"], "mistral:latest", True),
+        (["mistral:7b"], "mistral", False),  # a different tag
+        (["qwen2.5:7b"], "mistral", False),
+        (["qwen2.5:7b"], "qwen2.5:7b", True),
+        ([], "mistral", False),
+    ],
+)
+async def test_check_status_requires_the_configured_model(monkeypatch, installed, wanted, ok):
+    from app.core.config import settings
+
+    real = httpx.AsyncClient
+    monkeypatch.setattr(ollama_client.httpx, "AsyncClient",
+                        lambda **kw: real(transport=_tags_transport(installed)))
+    monkeypatch.setattr(settings, "ollama_model", wanted)
+    available, detail = await ollama_client.check_status()
+    assert available is ok
+    if not ok:
+        assert f"ollama pull {wanted}" in detail and "installed:" in detail
+
+
+async def test_check_status_when_server_down(monkeypatch):
+    def handler(request):
+        raise httpx.ConnectError("refused")
+
+    real = httpx.AsyncClient
+    monkeypatch.setattr(ollama_client.httpx, "AsyncClient",
+                        lambda **kw: real(transport=httpx.MockTransport(handler)))
+    available, detail = await ollama_client.check_status()
+    assert not available and "ollama serve" in detail
+
+
+async def test_generate_reports_missing_model_plainly(monkeypatch):
+    def handler(request):
+        return httpx.Response(404, json={"error": "model 'mistral' not found"})
+
+    real = httpx.AsyncClient
+    monkeypatch.setattr(ollama_client.httpx, "AsyncClient",
+                        lambda **kw: real(transport=httpx.MockTransport(handler)))
+    with pytest.raises(ollama_client.OllamaError, match="model 'mistral' not found"):
+        await ollama_client.generate(ExplainRequest(vuln_id="X", package="p"))

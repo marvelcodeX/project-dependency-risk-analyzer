@@ -40,6 +40,34 @@ def _rating(v: Vulnerability) -> dict:
     return rating
 
 
+def _dependency_graph(scan: ScanResponse) -> list[dict]:
+    """CycloneDX ``dependencies`` from the manifest's graph, when it has one.
+
+    Emitted only if the manifest says which packages are direct (npm lockfile
+    v2/v3, go.mod, pom.xml, package.json) — otherwise listing everything under
+    the project would misstate transitive packages as direct.
+    """
+    deps = [r.dependency for r in scan.results]
+    if not any(d.direct is not None for d in deps):
+        return []
+    ref_by_key = {d.key: component_ref(d) for d in deps}
+    graph = [{
+        "ref": "soteria:project",
+        "dependsOn": sorted({ref_by_key[d.key] for d in deps if d.direct}),
+    }]
+    seen: set[str] = set()
+    for d in deps:
+        ref = ref_by_key[d.key]
+        if ref in seen:
+            continue
+        seen.add(ref)
+        graph.append({
+            "ref": ref,
+            "dependsOn": sorted({ref_by_key[k] for k in d.depends_on if k in ref_by_key}),
+        })
+    return graph
+
+
 def render_cyclonedx(scan: ScanResponse) -> dict:
     components: dict[str, dict] = {}
     for r in scan.results:
@@ -79,6 +107,8 @@ def render_cyclonedx(scan: ScanResponse) -> dict:
             }
             if v.details:
                 entry["detail"] = v.details
+            if v.cwe_ids:
+                entry["cwes"] = [int(c[4:]) for c in v.cwe_ids]
             refs = [
                 {
                     "id": cve,
@@ -107,10 +137,10 @@ def render_cyclonedx(scan: ScanResponse) -> dict:
                 {"name": f"soteria:reachability:{ref}", "value": v.reachability},
             ]
         )
-        if v.in_cisa_kev and not any(
-            p["name"] == "soteria:cisa_kev" for p in entry["properties"]
-        ):
-            entry["properties"].append({"name": "soteria:cisa_kev", "value": "true"})
+        for flag, on in (("soteria:cisa_kev", v.in_cisa_kev),
+                         ("soteria:public_exploit", v.has_public_exploit)):
+            if on and not any(p["name"] == flag for p in entry["properties"]):
+                entry["properties"].append({"name": flag, "value": "true"})
 
     timestamp = (scan.created_at or datetime.now(timezone.utc)).astimezone(
         timezone.utc
@@ -144,8 +174,7 @@ def render_cyclonedx(scan: ScanResponse) -> dict:
                 {"name": "soteria:risk_level", "value": scan.risk_level},
             ],
         },
-        # No "dependencies" graph: lockfile scans mix direct and transitive
-        # packages, and we don't know which is which.
         "components": list(components.values()),
+        **({"dependencies": graph} if (graph := _dependency_graph(scan)) else {}),
         "vulnerabilities": list(vulns.values()),
     }

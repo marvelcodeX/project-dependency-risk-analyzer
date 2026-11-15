@@ -11,6 +11,7 @@ Raises ``ManifestError`` for unparseable/unsupported manifests and
 from app.parsers import detect_format, parse_manifest
 from app.schemas.scan import DependencyScanResult, ScanResponse, Vulnerability
 from app.services import reachability as reach
+from app.services import registry
 from app.services.kev_client import get_kev_cve_ids
 from app.services.osv_client import query_osv_many
 from app.services.risk import compute_risk, risk_level
@@ -47,6 +48,11 @@ def dedupe_advisories(vulns: list[Vulnerability]) -> list[Vulnerability]:
                 (m.fixed_version for m in members if m.fixed_version), None
             )
         best.aliases = sorted(ids - {best.id})
+        # Enrichment from any duplicate counts (e.g. CWEs only on the GHSA).
+        best.cwe_ids = sorted(
+            {c for m in members for c in m.cwe_ids}, key=lambda c: int(c[4:])
+        )
+        best.has_public_exploit = any(m.has_public_exploit for m in members)
         out.append(best)
     return out
 
@@ -63,10 +69,14 @@ async def scan_manifest(
     if not filename or filename == "pasted":
         filename = fmt
 
-    # Reachability: analyze provided source once (empty → everything UNKNOWN).
-    source_files = source_files or {}
-    has_source = bool(source_files)
-    imported_modules = reach.analyze_imports(source_files) if has_source else set()
+    # Unversioned deps (bare "numpy", "*"): scan the version an install would
+    # pick today instead of every advisory ever filed for the package.
+    await registry.resolve_unversioned(dependencies)
+
+    # Reachability: analyze provided source once per language (Python, JS/TS),
+    # then classify every package, propagating through the dependency graph.
+    imports = reach.analyze_sources(source_files or {})
+    reachability_by_key = reach.classify_all(dependencies, imports)
 
     # KEV catalog is fetched once (cached) and reused for the whole scan.
     kev_ids = await get_kev_cve_ids()
@@ -76,9 +86,7 @@ async def scan_manifest(
     overall_risk = 0
     for dep, vulns in zip(dependencies, all_vulns):
         vulns = dedupe_advisories(vulns)
-        reachability = reach.classify(
-            dep.name, imported_modules, has_source, dep.ecosystem
-        )
+        reachability = reachability_by_key[dep.key]
         for v in vulns:
             cve_ids = {a for a in v.aliases if a.startswith("CVE-")}
             if v.id.startswith("CVE-"):

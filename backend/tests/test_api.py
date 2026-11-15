@@ -201,3 +201,23 @@ def test_dedupe_advisories_merges_aliases():
     assert out["GHSA-a"].aliases == ["CVE-1", "PYSEC-1"]
     assert out["GHSA-a"].fixed_version == "2.0"  # borrowed from the duplicate
     assert out["GHSA-b"].aliases == ["CVE-2", "PYSEC-2"]
+
+
+async def test_ecosystems_lists_every_parser():
+    from app.parsers import SUPPORTED_FORMATS
+
+    async with await _client() as ac:
+        data = (await ac.get("/api/ecosystems")).json()
+    assert [d["format"] for d in data] == list(SUPPORTED_FORMATS)
+    by_format = {d["format"]: d for d in data}
+    assert by_format["go.mod"] == {"format": "go.mod", "ecosystem": "Go", "reachability": False}
+    assert by_format["package-lock.json"]["reachability"] is True
+
+
+async def test_history_includes_finding_counts():
+    async with await _client() as ac:
+        scan = (await ac.post("/api/scan/text", json={"content": "flask==2.0.1\nnumpy==1.0"})).json()
+        clean = (await ac.post("/api/scan/text", json={"content": "numpy==1.0"})).json()
+        listing = {s["id"]: s for s in (await ac.get("/api/scans")).json()}
+    assert listing[scan["id"]]["total_findings"] == 1
+    assert listing[clean["id"]]["total_findings"] == 0

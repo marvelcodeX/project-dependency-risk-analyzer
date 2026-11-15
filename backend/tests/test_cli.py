@@ -170,3 +170,22 @@ def test_unexpected_crash_exits_2_not_1(repo, monkeypatch, capsys):
     monkeypatch.setattr(cli, "render", _boom)
     assert cli.main(["scan", "-q", "-o", "json=out.json"]) == cli.EXIT_ERROR
     assert "kaboom" in capsys.readouterr().err
+
+
+def test_discovery_covers_every_registered_format(tmp_path, monkeypatch):
+    """Guard against drift: a parser added to app.parsers must be discovered
+    by directory scans too, or CI would silently skip that manifest."""
+    from app.parsers import SUPPORTED_FORMATS
+
+    monkeypatch.chdir(tmp_path)
+    for i, fmt in enumerate(SUPPORTED_FORMATS):
+        d = tmp_path / f"p{i}"
+        d.mkdir()
+        (d / fmt).write_text("")
+    (tmp_path / "requirements").mkdir()
+    (tmp_path / "requirements" / "base.txt").write_text("")
+    (tmp_path / "notes.txt").write_text("")  # not a manifest
+
+    found = {p.name for p in cli.discover_manifests([Path(".")])}
+    # package.json next to no lockfile is kept; every format is present.
+    assert found == set(SUPPORTED_FORMATS) | {"base.txt"}

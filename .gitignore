@@ -25,6 +25,7 @@ desktop.ini
 .env
 .env.local
 *.env
+!.env.example
 
 # Node / Frontend
 node_modules/
@@ -47,6 +48,7 @@ htmlcov/
 *.db-journal
 *.db-wal
 *.db-shm
+*.db.bak*
 soteria.db
 
 

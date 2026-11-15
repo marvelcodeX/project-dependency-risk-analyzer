@@ -24,8 +24,8 @@ jobs:
         uses: ./
         with:
           path: backend frontend
-          source: backend
-          fail-on: critical
+          source: backend frontend/src
+          fail-on: high
       - name: Result
         if: always()
         run: >

@@ -11,6 +11,18 @@ class Dependency(BaseModel):
     ecosystem: str = "PyPI"
     pinned: bool = False
     raw_spec: str = ""
+    # Dependency graph. None = unknown (the manifest doesn't say).
+    direct: bool | None = None
+    depth: int | None = None  # 0 = direct, 1+ = transitive hops
+    depends_on: list[str] = []  # keys ("name@version") of this package's deps
+    # "declared" = from the manifest; "latest" = resolved from the registry
+    # because the manifest gave no usable version (e.g. a bare "numpy").
+    version_source: str = "declared"
+
+    @property
+    def key(self) -> str:
+        """Graph key used in ``depends_on``."""
+        return f"{self.name}@{self.version or ''}"
 
 
 class Vulnerability(BaseModel):
@@ -29,6 +41,9 @@ class Vulnerability(BaseModel):
     risk_level: str = "NONE"
     # Phase 3 reachability: UNKNOWN / REACHABLE / POTENTIALLY_REACHABLE / UNREACHABLE
     reachability: str = "UNKNOWN"
+    # Enrichment: CWE weakness ids and whether a public exploit/PoC exists.
+    cwe_ids: list[str] = []
+    has_public_exploit: bool = False
 
 
 class DependencyScanResult(BaseModel):
@@ -65,3 +80,12 @@ class ScanListItem(BaseModel):
     vulnerable_dependencies: int
     risk_score: int
     risk_level: str
+    total_findings: int = 0
+
+
+class ManifestFormat(BaseModel):
+    """One supported manifest format (GET /api/ecosystems)."""
+
+    format: str
+    ecosystem: str
+    reachability: bool  # whether source can be analyzed for this ecosystem

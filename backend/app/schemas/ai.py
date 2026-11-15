@@ -22,6 +22,8 @@ class ExplainRequest(BaseModel):
     in_cisa_kev: bool = False
     risk_level: str = "NONE"
     reachability: str = "UNKNOWN"
+    cwe_ids: list[str] = []
+    has_public_exploit: bool = False
 
 
 class AiExplanation(BaseModel):

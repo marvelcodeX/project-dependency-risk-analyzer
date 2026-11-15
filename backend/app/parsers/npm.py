@@ -93,6 +93,8 @@ def parse_package_json(content: str) -> list[Dependency]:
                     ecosystem=ECOSYSTEM,
                     pinned=pinned,
                     raw_spec=spec,
+                    direct=True,
+                    depth=0,
                 )
             )
     return deps
@@ -102,47 +104,136 @@ def _looks_like_version(v: object) -> bool:
     return isinstance(v, str) and bool(v) and v[0].isdigit()
 
 
-def parse_package_lock(content: str) -> list[Dependency]:
-    """Parse the full resolved tree from a ``package-lock.json`` (v1–v3)."""
-    data = _load_json(content)
-    found: dict[tuple[str, str], Dependency] = {}
+_DEP_FIELDS = ("dependencies", "optionalDependencies", "peerDependencies")
+_ROOT_FIELDS = ("dependencies", "devDependencies", "optionalDependencies")
 
-    def _add(name: str, version: str) -> None:
-        key = (name, version)
-        if key not in found:
-            found[key] = Dependency(
-                name=name,
-                version=version,
-                ecosystem=ECOSYSTEM,
-                pinned=True,
-                raw_spec=version,
+
+def _resolve(nodes: dict[str, dict], from_path: str, child: str) -> str | None:
+    """Find the install path ``child`` resolves to from ``from_path``.
+
+    Mirrors Node's lookup: try ``<from>/node_modules/<child>``, then each
+    ancestor's ``node_modules``, up to the project root.
+    """
+    base = from_path
+    while True:
+        cand = f"{base}/node_modules/{child}" if base else f"node_modules/{child}"
+        if cand in nodes:
+            return cand
+        if not base:
+            return None
+        idx = base.rfind("node_modules/")
+        base = base[:idx].rstrip("/") if idx > 0 else ""
+
+
+def _build(nodes: dict[str, dict], edges: dict[str, list[str]],
+           direct_paths: set[str] | None) -> list[Dependency]:
+    """Collapse install paths into one Dependency per (name, version).
+
+    ``direct_paths`` is None when the lockfile can't say what's direct (v1).
+    """
+    depth: dict[str, int] = {}
+    if direct_paths is not None:
+        frontier = sorted(direct_paths)
+        for p in frontier:
+            depth[p] = 0
+        while frontier:  # breadth-first: shortest distance from the project
+            nxt = []
+            for p in frontier:
+                for c in edges.get(p, []):
+                    if c not in depth:
+                        depth[c] = depth[p] + 1
+                        nxt.append(c)
+            frontier = nxt
+
+    def key(p: str) -> str:
+        return f"{nodes[p]['name']}@{nodes[p]['version']}"
+
+    out: dict[str, Dependency] = {}
+    for p, n in nodes.items():
+        k = key(p)
+        children = {key(c) for c in edges.get(p, [])}
+        d = depth.get(p)
+        if k not in out:
+            out[k] = Dependency(
+                name=n["name"], version=n["version"], ecosystem=ECOSYSTEM,
+                pinned=True, raw_spec=n["version"],
+                direct=None if direct_paths is None else p in direct_paths,
+                depth=d, depends_on=sorted(children),
             )
+            continue
+        dep = out[k]  # same package installed at several paths: merge
+        dep.depends_on = sorted(set(dep.depends_on) | children)
+        if direct_paths is not None:
+            dep.direct = bool(dep.direct) or p in direct_paths
+            if d is not None and (dep.depth is None or d < dep.depth):
+                dep.depth = d
+    return list(out.values())
 
+
+def parse_package_lock(content: str) -> list[Dependency]:
+    """Parse the full resolved tree from a ``package-lock.json`` (v1–v3).
+
+    Includes the dependency graph: ``direct``/``depth`` (v2/v3 only — v1
+    doesn't record which packages the project itself declared) and
+    ``depends_on`` edges.
+    """
+    data = _load_json(content)
     packages = data.get("packages")
     if isinstance(packages, dict):
-        # lockfileVersion 2/3: flat map of install paths.
-        for path, meta in packages.items():
-            if not path or "node_modules/" not in path or not isinstance(meta, dict):
-                continue  # "" is the root project; others are workspaces
-            if meta.get("link"):
-                continue
+        return _parse_v2(packages)
+    return _parse_v1(data.get("dependencies") or {})
+
+
+def _parse_v2(packages: dict) -> list[Dependency]:
+    """lockfileVersion 2/3: a flat map of install paths → metadata."""
+    nodes: dict[str, dict] = {}
+    roots: list[str] = []  # the project ("") plus any workspace packages
+    for path, meta in packages.items():
+        if not isinstance(meta, dict):
+            continue
+        if not path or "node_modules/" not in path:
+            roots.append(path)
+            continue
+        if meta.get("link"):
+            continue  # symlink to a workspace package, which is a root
+        version = meta.get("version")
+        if _looks_like_version(version):
             name = meta.get("name") or path.rsplit("node_modules/", 1)[1]
-            version = meta.get("version")
-            if _looks_like_version(version):
-                _add(name, version)
-    else:
-        # lockfileVersion 1: nested "dependencies" tree.
-        def _walk(tree: dict) -> None:
-            for name, meta in tree.items():
-                if not isinstance(meta, dict):
-                    continue
-                version = meta.get("version")
-                if _looks_like_version(version):
-                    _add(name, version)
-                nested = meta.get("dependencies")
-                if isinstance(nested, dict):
-                    _walk(nested)
+            nodes[path] = {"name": name, "version": version, "meta": meta}
 
-        _walk(data.get("dependencies") or {})
+    edges: dict[str, list[str]] = {}
+    for path, n in nodes.items():
+        names = {c for f in _DEP_FIELDS for c in (n["meta"].get(f) or {})}
+        resolved = (_resolve(nodes, path, c) for c in sorted(names))
+        edges[path] = [r for r in resolved if r and r != path]
 
-    return list(found.values())
+    direct: set[str] = set()
+    for root in roots:
+        meta = packages.get(root) or {}
+        for c in {c for f in _ROOT_FIELDS for c in (meta.get(f) or {})}:
+            if r := _resolve(nodes, root, c):
+                direct.add(r)
+    return _build(nodes, edges, direct)
+
+
+def _parse_v1(tree: dict) -> list[Dependency]:
+    """lockfileVersion 1: a nested tree with "requires" edges."""
+    nodes: dict[str, dict] = {}
+
+    def walk(subtree: dict, prefix: str) -> None:
+        for name, meta in subtree.items():
+            if not isinstance(meta, dict):
+                continue
+            path = f"{prefix}/node_modules/{name}" if prefix else f"node_modules/{name}"
+            if _looks_like_version(meta.get("version")):
+                nodes[path] = {"name": name, "version": meta["version"], "meta": meta}
+            if isinstance(meta.get("dependencies"), dict):
+                walk(meta["dependencies"], path)
+
+    walk(tree, "")
+    edges: dict[str, list[str]] = {}
+    for path, n in nodes.items():
+        requires = n["meta"].get("requires") or {}
+        resolved = (_resolve(nodes, path, c) for c in sorted(requires))
+        edges[path] = [r for r in resolved if r and r != path]
+    return _build(nodes, edges, None)

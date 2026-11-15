@@ -7,7 +7,7 @@ to stay portable across SQLite and PostgreSQL.
 
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, String
+from sqlalchemy import JSON, DateTime, Float, ForeignKey, String, false
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db import Base
@@ -53,6 +53,14 @@ class ScanDependency(Base):
     ecosystem: Mapped[str] = mapped_column(String(50), default="PyPI")
     pinned: Mapped[bool] = mapped_column(default=False)
     raw_spec: Mapped[str] = mapped_column(String(255), default="")
+    # Dependency graph (migration 0002). NULL = unknown (older scans, or a
+    # manifest that doesn't say).
+    is_direct: Mapped[bool | None] = mapped_column(nullable=True)
+    depth: Mapped[int | None] = mapped_column(nullable=True)
+    depends_on: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    version_source: Mapped[str] = mapped_column(
+        String(20), default="declared", server_default="declared"
+    )
 
     scan: Mapped["Scan"] = relationship(back_populates="dependencies")
     vulnerabilities: Mapped[list["ScanVulnerability"]] = relationship(
@@ -84,6 +92,11 @@ class ScanVulnerability(Base):
     risk_score: Mapped[int] = mapped_column(default=0)
     risk_level: Mapped[str] = mapped_column(String(20), default="NONE")
     reachability: Mapped[str] = mapped_column(String(30), default="UNKNOWN")
+    # Enrichment (migration 0002).
+    cwe_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    has_public_exploit: Mapped[bool] = mapped_column(
+        default=False, server_default=false()
+    )
 
     scan: Mapped["Scan"] = relationship(back_populates="vulnerabilities")
     dependency: Mapped["ScanDependency"] = relationship(

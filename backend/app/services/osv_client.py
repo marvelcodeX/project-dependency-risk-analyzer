@@ -4,6 +4,8 @@ Docs: https://osv.dev/docs/
 """
 
 import asyncio
+import re
+from urllib.parse import urlparse
 
 import httpx
 from app.schemas.scan import Dependency, Vulnerability
@@ -16,6 +18,16 @@ OSV_API_URL = "https://api.osv.dev/v1/query"
 _MAX_CONCURRENCY = 10
 # Safety stop for pagination (OSV pages are large; this is effectively "all").
 _MAX_PAGES = 20
+
+# Public exploit archives. A reference into one of these means working exploit
+# code / a PoC is publicly available (plan §9.2 "public PoC" tier).
+_EXPLOIT_HOSTS = {
+    "exploit-db.com": "/exploits/",
+    "www.exploit-db.com": "/exploits/",
+    "packetstormsecurity.com": "/files/",
+    "packetstorm.news": "/files/",
+}
+_CWE_RE = re.compile(r"^CWE-\d+$")
 
 
 class OsvError(RuntimeError):
@@ -69,7 +81,8 @@ async def query_osv(
     for v in vulns_raw:
         severity, cvss_score, cvss_vector = _extract_severity(v)
         fixed = _extract_fixed_version(v, dep)
-        refs = [r.get("url", "") for r in v.get("references", []) if r.get("url")]
+        raw_refs = [r for r in v.get("references", []) if r.get("url")]
+        refs = [r["url"] for r in raw_refs]
 
         vulnerabilities.append(
             Vulnerability(
@@ -82,6 +95,8 @@ async def query_osv(
                 cvss_vector=cvss_vector,
                 fixed_version=fixed,
                 references=refs[:5],  # limit to 5 references
+                cwe_ids=_extract_cwes(v),
+                has_public_exploit=_has_public_exploit(raw_refs),
             )
         )
 
@@ -126,6 +141,27 @@ def _extract_severity(vuln: dict) -> tuple[str, float | None, str | None]:
         return db_specific["severity"].upper(), None, None
 
     return "UNKNOWN", None, None
+
+
+def _extract_cwes(vuln: dict) -> list[str]:
+    """CWE ids from OSV's database_specific block (GitHub advisories set it)."""
+    raw = (vuln.get("database_specific") or {}).get("cwe_ids") or []
+    return sorted(
+        {c.strip().upper() for c in raw if isinstance(c, str) and _CWE_RE.match(c.strip().upper())},
+        key=lambda c: int(c[4:]),
+    )
+
+
+def _has_public_exploit(refs: list[dict]) -> bool:
+    """True if any reference is exploit evidence or points into an exploit archive."""
+    for r in refs:
+        if r.get("type") == "EVIDENCE":
+            return True
+        u = urlparse(r.get("url", ""))
+        prefix = _EXPLOIT_HOSTS.get(u.netloc.lower())
+        if prefix and u.path.startswith(prefix):
+            return True
+    return False
 
 
 def _norm_name(name: str, ecosystem: str) -> str:

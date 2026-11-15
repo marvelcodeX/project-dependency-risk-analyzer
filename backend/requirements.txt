@@ -3,7 +3,7 @@ uvicorn[standard]>=0.34.0
 httpx>=0.28.0
 pydantic>=2.10.0
 pydantic-settings>=2.6.0
-python-multipart>=0.0.20
+python-multipart>=0.0.31
 packaging>=24.0           # PEP 440 version comparison (fixed-version matching)
 defusedxml>=0.7.1         # safe parsing of untrusted pom.xml uploads
 
@@ -11,8 +11,10 @@ defusedxml>=0.7.1         # safe parsing of untrusted pom.xml uploads
 sqlalchemy>=2.0.0
 greenlet>=3.0.0          # required by SQLAlchemy's async engine
 aiosqlite>=0.20.0        # default SQLite driver (zero-config)
+alembic>=1.13.0          # schema migrations (run automatically on startup)
 asyncpg>=0.30.0          # PostgreSQL driver (set DATABASE_URL=postgresql+asyncpg://...)
 
 # Dev / test
-pytest>=8.0.0
-pytest-asyncio>=0.24.0
+pytest>=9.0.3
+pytest-asyncio>=1.0.0
+jsonschema>=4.23.0       # validates SARIF / CycloneDX output against official schemas

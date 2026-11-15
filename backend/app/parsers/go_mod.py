@@ -20,11 +20,13 @@ def _strip_v(version: str) -> str:
     return version[1:] if version.startswith("v") else version
 
 
-def _directives(content: str) -> list[tuple[str, str]]:
-    """Yield ``(verb, args)`` for each directive, flattening ``( ... )`` blocks."""
-    out: list[tuple[str, str]] = []
+def _directives(content: str) -> list[tuple[str, str, str]]:
+    """Yield ``(verb, args, comment)`` per directive, flattening ``( ... )`` blocks."""
+    out: list[tuple[str, str, str]] = []
     block: str | None = None
     for raw in content.splitlines():
+        m = _COMMENT_RE.search(raw)
+        comment = m.group(0)[2:].strip() if m else ""
         line = _COMMENT_RE.sub("", raw).strip()
         if not line:
             continue
@@ -32,26 +34,30 @@ def _directives(content: str) -> list[tuple[str, str]]:
             if line == ")":
                 block = None
             else:
-                out.append((block, line))
+                out.append((block, line, comment))
             continue
         verb, _, rest = line.partition(" ")
         rest = rest.strip()
         if rest == "(":
             block = verb
         else:
-            out.append((verb, rest))
+            out.append((verb, rest, comment))
     return out
 
 
 def parse_go_mod(content: str) -> list[Dependency]:
     """Parse module requirements from a ``go.mod`` file."""
     requires: dict[str, str] = {}
+    indirect: set[str] = set()
     replaces: list[tuple[str, str | None, str, str | None]] = []
 
-    for verb, args in _directives(content):
+    for verb, args, comment in _directives(content):
         parts = args.replace('"', "").split()
         if verb == "require" and len(parts) >= 2:
             requires[parts[0]] = parts[1]
+            # "// indirect" marks modules needed only by other dependencies.
+            if comment.split(";")[0].strip() == "indirect":
+                indirect.add(parts[0])
         elif verb == "replace" and "=>" in parts:
             i = parts.index("=>")
             old, new = parts[:i], parts[i + 1:]
@@ -82,6 +88,10 @@ def parse_go_mod(content: str) -> list[Dependency]:
                 ecosystem=ECOSYSTEM,
                 pinned=ver is not None,
                 raw_spec=version,
+                # go.mod lists the whole build list, but records only *whether*
+                # a module is indirect, not how deep it sits.
+                direct=path not in indirect,
+                depth=None if path in indirect else 0,
             )
         )
     return deps

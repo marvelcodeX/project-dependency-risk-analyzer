@@ -98,12 +98,16 @@ def parse_pom_xml(content: str) -> list[Dependency]:
             if p.text:
                 props[_local(p.tag)] = p.text.strip()
 
-    dep_lists = [_child(root, "dependencies")]
-    dep_lists.append(_child(_child(root, "dependencyManagement"), "dependencies"))
+    # (list, declared directly?) — dependencyManagement only pins versions of
+    # packages that may or may not be used, typically transitively.
+    dep_lists = [
+        (_child(root, "dependencies"), True),
+        (_child(_child(root, "dependencyManagement"), "dependencies"), False),
+    ]
 
     deps: list[Dependency] = []
     seen: set[str] = set()
-    for dep_list in dep_lists:
+    for dep_list, declared in dep_lists:
         if dep_list is None:
             continue
         for d in dep_list:
@@ -127,6 +131,8 @@ def parse_pom_xml(content: str) -> list[Dependency]:
                     ecosystem=ECOSYSTEM,
                     pinned=pinned,
                     raw_spec=raw,
+                    direct=declared,
+                    depth=0 if declared else None,
                 )
             )
     return deps

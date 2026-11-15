@@ -28,9 +28,12 @@ RUN sed -i '/^# Dev \/ test/,$d' requirements.txt \
     && pip install -r requirements.txt
 
 COPY backend/app ./app
+# Migrations run automatically on startup (app.core.db.init_db).
+COPY backend/alembic.ini ./alembic.ini
+COPY backend/migrations ./migrations
 COPY --from=frontend /src/dist ./static
 
-RUN useradd --system --uid 10001 --home-dir /app soteria \
+RUN useradd --uid 10001 --no-create-home --home-dir /app --shell /usr/sbin/nologin soteria \
     && mkdir -p /data && chown soteria /data
 USER soteria
 VOLUME ["/data"]

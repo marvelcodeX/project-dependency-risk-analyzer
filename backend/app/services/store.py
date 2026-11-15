@@ -1,6 +1,6 @@
 """Persistence helpers: save a scan and reload it from the database."""
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -30,6 +30,10 @@ async def save_scan(session: AsyncSession, response: ScanResponse) -> Scan:
             ecosystem=result.dependency.ecosystem,
             pinned=result.dependency.pinned,
             raw_spec=result.dependency.raw_spec,
+            is_direct=result.dependency.direct,
+            depth=result.dependency.depth,
+            depends_on=result.dependency.depends_on,
+            version_source=result.dependency.version_source,
         )
         for v in result.vulnerabilities:
             dep.vulnerabilities.append(
@@ -48,6 +52,8 @@ async def save_scan(session: AsyncSession, response: ScanResponse) -> Scan:
                     risk_score=v.risk_score,
                     risk_level=v.risk_level,
                     reachability=v.reachability,
+                    cwe_ids=v.cwe_ids,
+                    has_public_exploit=v.has_public_exploit,
                 )
             )
         scan.dependencies.append(dep)
@@ -58,12 +64,22 @@ async def save_scan(session: AsyncSession, response: ScanResponse) -> Scan:
     return scan
 
 
-async def list_scans(session: AsyncSession, limit: int = 50) -> list[Scan]:
-    """Return recent scans, newest first (summary rows only)."""
-    result = await session.execute(
-        select(Scan).order_by(Scan.created_at.desc(), Scan.id.desc()).limit(limit)
+async def list_scans(
+    session: AsyncSession, limit: int = 50
+) -> list[tuple[Scan, int]]:
+    """Recent scans, newest first, each with its number of findings."""
+    findings = (
+        select(ScanVulnerability.scan_id, func.count().label("n"))
+        .group_by(ScanVulnerability.scan_id)
+        .subquery()
     )
-    return list(result.scalars().all())
+    result = await session.execute(
+        select(Scan, func.coalesce(findings.c.n, 0))
+        .outerjoin(findings, findings.c.scan_id == Scan.id)
+        .order_by(Scan.created_at.desc(), Scan.id.desc())
+        .limit(limit)
+    )
+    return [(scan, int(n)) for scan, n in result.all()]
 
 
 async def get_scan(session: AsyncSession, scan_id: int) -> ScanResponse | None:
@@ -89,6 +105,10 @@ async def get_scan(session: AsyncSession, scan_id: int) -> ScanResponse | None:
                 ecosystem=dep.ecosystem,
                 pinned=dep.pinned,
                 raw_spec=dep.raw_spec,
+                direct=dep.is_direct,
+                depth=dep.depth,
+                depends_on=dep.depends_on or [],
+                version_source=dep.version_source or "declared",
             ),
             vulnerabilities=[
                 Vulnerability(
@@ -105,6 +125,8 @@ async def get_scan(session: AsyncSession, scan_id: int) -> ScanResponse | None:
                     risk_score=v.risk_score,
                     risk_level=v.risk_level,
                     reachability=v.reachability,
+                    cwe_ids=v.cwe_ids or [],
+                    has_public_exploit=bool(v.has_public_exploit),
                 )
                 for v in sorted(
                     dep.vulnerabilities, key=lambda x: x.risk_score, reverse=True

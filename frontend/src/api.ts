@@ -6,6 +6,14 @@ export interface Dependency {
   ecosystem: string
   pinned: boolean
   raw_spec: string
+  /** null = unknown (the manifest doesn't say). */
+  direct: boolean | null
+  /** 0 = direct, 1+ = transitive hops; null = unknown. */
+  depth: number | null
+  /** Graph keys ("name@version") of this package's own dependencies. */
+  depends_on: string[]
+  /** "declared" = from the manifest; "latest" = resolved from the registry. */
+  version_source: 'declared' | 'latest' | string
 }
 
 export type Severity =
@@ -34,6 +42,8 @@ export interface Vulnerability {
   risk_score: number
   risk_level: RiskLevel
   reachability: Reachability
+  cwe_ids: string[]
+  has_public_exploit: boolean
 }
 
 export type Reachability =
@@ -66,6 +76,21 @@ export interface ScanListItem {
   vulnerable_dependencies: number
   risk_score: number
   risk_level: RiskLevel
+  total_findings: number
+}
+
+export interface ManifestFormat {
+  format: string
+  ecosystem: string
+  /** Whether source can be analyzed for reachability in this ecosystem. */
+  reachability: boolean
+}
+
+/** Supported manifest formats, from the backend (single source of truth). */
+export async function listFormats(): Promise<ManifestFormat[]> {
+  const res = await fetch('/api/ecosystems')
+  if (!res.ok) throw new Error(`Failed to load formats (${res.status})`)
+  return res.json()
 }
 
 /** Scan pasted requirements.txt text, optionally with source for reachability. */
@@ -95,14 +120,14 @@ async function errorDetail(res: Response, prefix: string): Promise<string> {
   return `${prefix} (${res.status}): ${text}`
 }
 
-/** Manifest formats the backend can parse. 'pasted' = auto-detect. */
-export const MANIFEST_FORMATS = [
-  'requirements.txt',
-  'package.json',
-  'package-lock.json',
-  'go.mod',
-  'pom.xml',
-] as const
+/** Fallback until /api/ecosystems answers (or if it can't be reached). */
+export const FALLBACK_FORMATS: ManifestFormat[] = [
+  { format: 'requirements.txt', ecosystem: 'PyPI', reachability: true },
+  { format: 'package.json', ecosystem: 'npm', reachability: true },
+  { format: 'package-lock.json', ecosystem: 'npm', reachability: true },
+  { format: 'go.mod', ecosystem: 'Go', reachability: false },
+  { format: 'pom.xml', ecosystem: 'Maven', reachability: false },
+]
 
 /** Scan an uploaded dependency file, optionally with source for reachability. */
 export async function scanFile(
@@ -112,7 +137,7 @@ export async function scanFile(
   const form = new FormData()
   form.append('file', file)
   for (const [name, code] of Object.entries(sourceFiles)) {
-    form.append('source_files', new Blob([code], { type: 'text/x-python' }), name)
+    form.append('source_files', new Blob([code], { type: 'text/plain' }), name)
   }
   const res = await fetch('/api/scan/file', { method: 'POST', body: form })
   if (!res.ok) throw new Error(await errorDetail(res, 'Scan failed'))
@@ -187,6 +212,8 @@ export function toExplainRequest(
     in_cisa_kev: vuln.in_cisa_kev,
     risk_level: vuln.risk_level,
     reachability: vuln.reachability,
+    cwe_ids: vuln.cwe_ids,
+    has_public_exploit: vuln.has_public_exploit,
   }
 }
 

@@ -6,11 +6,16 @@ Goes beyond raw CVSS to a 0-100 score, following the model in the project plan
 Components (max shown):
 - base          (40): CVSS base score, normalized. Falls back to a coarse
                       mapping from the qualitative severity label when no CVSS.
-- exploit       (25): +25 if the CVE is in the CISA KEV catalog (in the wild).
+- exploit       (25): +25 if the CVE is in the CISA KEV catalog (in the wild),
+                      else +20 if a public exploit / PoC is referenced.
 - reachability  (20): does the project's code actually import the package?
                       REACHABLE +20, POTENTIALLY/UNKNOWN +10, UNREACHABLE +0.
 - fix           (10): +10 when NO patched version exists (harder to remediate).
-- exposure       (5): +5 for an unpinned dependency, else +3 (deps are direct).
+- depth          (5): plan §9.2 — direct +5, transitive within 2 hops +3,
+                      deeper +1 (transitive of unknown depth +3). When the
+                      manifest can't say what's direct (requirements.txt, npm
+                      lockfile v1), falls back to version exposure: a non-exact
+                      version +5, an exact pin +3.
 """
 
 from app.schemas.scan import Dependency, Vulnerability
@@ -55,6 +60,15 @@ def risk_level(score: int) -> str:
     return "NONE"
 
 
+def _depth_points(dep: Dependency) -> float:
+    if dep.direct is True:
+        return 5.0
+    if dep.direct is False:
+        return 1.0 if (dep.depth is not None and dep.depth > 2) else 3.0
+    # Unknown graph position: a floating version can resolve to anything.
+    return 3.0 if dep.pinned else 5.0
+
+
 def compute_risk(
     vuln: Vulnerability,
     dep: Dependency,
@@ -63,12 +77,15 @@ def compute_risk(
 ) -> tuple[int, str]:
     """Return ``(risk_score, risk_level)`` for a vulnerability in context."""
     base = _base_component(vuln)
-    exploit = 25.0 if in_kev else 0.0
+    if in_kev:
+        exploit = 25.0
+    elif vuln.has_public_exploit:
+        exploit = 20.0
+    else:
+        exploit = 0.0
     reach_pts = _REACH_POINTS.get(reachability, 10.0)
     fix = 0.0 if vuln.fixed_version else 10.0
-    # Any non-exact spec (a range, or no version at all) can float to a
-    # different release than the one we scored — more exposure than a pin.
-    exposure = 3.0 if dep.pinned else 5.0
+    depth = _depth_points(dep)
 
-    score = int(round(min(base + exploit + reach_pts + fix + exposure, 100.0)))
+    score = int(round(min(base + exploit + reach_pts + fix + depth, 100.0)))
     return score, risk_level(score)

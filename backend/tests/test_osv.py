@@ -148,3 +148,47 @@ async def test_query_osv_many_preserves_order(monkeypatch):
         [Dependency(name=n) for n in ("a", "b", "c")]
     )
     assert [[v.id for v in vs] for vs in out] == [[], ["b"], ["c"]]
+
+
+# ---- enrichment: CWE + public exploit --------------------------------------
+
+
+def test_extract_cwes_normalizes_and_sorts():
+    from app.services.osv_client import _extract_cwes
+
+    vuln = {"database_specific": {"cwe_ids": ["CWE-917", "cwe-20", "CWE-400", "bogus", 5]}}
+    assert _extract_cwes(vuln) == ["CWE-20", "CWE-400", "CWE-917"]
+    assert _extract_cwes({}) == []
+
+
+@pytest.mark.parametrize(
+    ("refs", "expected"),
+    [
+        ([{"type": "EVIDENCE", "url": "https://example.com/poc"}], True),
+        ([{"type": "WEB", "url": "https://www.exploit-db.com/exploits/50592"}], True),
+        ([{"type": "WEB", "url": "https://packetstormsecurity.com/files/165673/x.html"}], True),
+        ([{"type": "WEB", "url": "https://packetstormsecurity.com/news/view/1"}], False),
+        ([{"type": "ADVISORY", "url": "https://github.com/advisories/GHSA-x"}], False),
+        ([], False),
+    ],
+)
+def test_public_exploit_detection(refs, expected):
+    from app.services.osv_client import _has_public_exploit
+
+    assert _has_public_exploit(refs) is expected
+
+
+async def test_query_osv_populates_enrichment():
+    def handler(request):
+        return httpx.Response(200, json={"vulns": [{
+            "id": "GHSA-e",
+            "database_specific": {"cwe_ids": ["CWE-502"]},
+            "references": [{"type": "WEB", "url": f"https://site/{i}"} for i in range(9)]
+            + [{"type": "WEB", "url": "https://www.exploit-db.com/exploits/1"}],
+        }]})
+
+    async with _client(handler) as c:
+        (v,) = await query_osv(Dependency(name="x", version="1"), c)
+    assert v.cwe_ids == ["CWE-502"]
+    assert v.has_public_exploit is True  # found beyond the 5 kept references
+    assert len(v.references) == 5

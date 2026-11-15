@@ -15,12 +15,8 @@ router = APIRouter(tags=["ai"], prefix="/ai")
 @router.get("/status", response_model=AiStatus)
 async def ai_status():
     """Report whether the local LLM is reachable, so the UI can adapt."""
-    available = await ollama_client.is_available()
-    return AiStatus(
-        available=available,
-        model=settings.ollama_model,
-        detail="" if available else "Ollama not reachable — run `ollama serve`.",
-    )
+    available, detail = await ollama_client.check_status()
+    return AiStatus(available=available, model=settings.ollama_model, detail=detail)
 
 
 @router.post("/explain", response_model=AiExplanationOut)
@@ -36,8 +32,8 @@ async def explain(
         raise HTTPException(
             status_code=503,
             detail=(
-                f"Local LLM unavailable: {exc}. Start Ollama with "
-                f"`ollama serve` and pull the model (`ollama pull "
-                f"{settings.ollama_model}`)."
+                f"Local LLM unavailable: {exc}. Check that `ollama serve` is "
+                f"running and the model is installed (`ollama pull "
+                f"{settings.ollama_model}`), or set OLLAMA_MODEL."
             ),
         )

@@ -4,9 +4,9 @@ from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFil
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
-from app.parsers import ManifestError
+from app.parsers import FORMAT_ECOSYSTEMS, ManifestError
 from app.reports import ReportFormat, render_report
-from app.schemas.scan import ScanListItem, ScanRequest, ScanResponse
+from app.schemas.scan import ManifestFormat, ScanListItem, ScanRequest, ScanResponse
 from app.services import scanner, store
 from app.services.osv_client import OsvError
 
@@ -65,8 +65,18 @@ async def list_scans(session: AsyncSession = Depends(get_session)):
             vulnerable_dependencies=s.vulnerable_dependencies,
             risk_score=s.risk_score,
             risk_level=s.risk_level,
+            total_findings=n,
         )
-        for s in scans
+        for s, n in scans
+    ]
+
+
+@router.get("/ecosystems", response_model=list[ManifestFormat])
+async def ecosystems():
+    """Supported manifest formats, so clients never hard-code the list."""
+    return [
+        ManifestFormat(format=f, ecosystem=e, reachability=e in ("PyPI", "npm"))
+        for f, e in FORMAT_ECOSYSTEMS.items()
     ]
 
 

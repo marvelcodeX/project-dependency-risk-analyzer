@@ -15,7 +15,7 @@ from app.schemas.ai import AiExplanation, ExplainRequest
 
 # Part of the AI cache key: bump whenever SYSTEM_PROMPT or _build_prompt
 # changes so explanations generated from the old prompt aren't reused.
-PROMPT_VERSION = "2"
+PROMPT_VERSION = "3"
 
 SYSTEM_PROMPT = (
     "You are a senior security analyst explaining a software dependency "
@@ -34,8 +34,8 @@ _REACHABILITY_TEXT = {
     "REACHABLE": "REACHABLE — the project's code imports this package",
     "UNREACHABLE": "UNREACHABLE — the package is not imported anywhere in the "
     "analyzed source (lower real-world risk for this project)",
-    "POTENTIALLY_REACHABLE": "POTENTIALLY REACHABLE — source was analyzed but "
-    "we could not confirm the import",
+    "POTENTIALLY_REACHABLE": "POTENTIALLY REACHABLE — not imported directly, but "
+    "pulled in by a package the code uses (or the import could not be confirmed)",
     "UNKNOWN": "UNKNOWN — no project source was provided for analysis",
 }
 
@@ -45,6 +45,11 @@ def _build_prompt(req: ExplainRequest) -> str:
     version = req.version or "unspecified"
     fix = req.fixed_version or "no fixed version published"
     kev = "YES — actively exploited in the wild" if req.in_cisa_kev else "no"
+    exploit = (
+        "YES — public exploit / proof-of-concept code is available"
+        if req.has_public_exploit else "none known"
+    )
+    cwe = ", ".join(req.cwe_ids) if req.cwe_ids else "not classified"
     cvss = f"{req.cvss_score}" if req.cvss_score is not None else "not available"
     reach = _REACHABILITY_TEXT.get(req.reachability, req.reachability)
     return f"""VULNERABILITY DATA
@@ -52,7 +57,9 @@ def _build_prompt(req: ExplainRequest) -> str:
 - CVE: {req.cve_id or "n/a"}
 - Package: {req.package} {version} ({req.ecosystem})
 - Severity: {req.severity} (CVSS {cvss})
+- Weakness type (CWE): {cwe}
 - In CISA KEV (exploited in the wild): {kev}
+- Public exploit: {exploit}
 - Reachability in this project: {reach}
 - Composite risk level: {req.risk_level}
 - Fixed version: {fix}
@@ -69,14 +76,41 @@ Respond with a JSON object using EXACTLY these keys, each a plain-English string
 Return only the JSON object, no prose before or after."""
 
 
-async def is_available() -> bool:
-    """True if the Ollama server responds. Best-effort, short timeout."""
+def _model_matches(installed: str, wanted: str) -> bool:
+    """Ollama lists "mistral:latest" for a model pulled as "mistral"."""
+    if ":" not in wanted:
+        wanted += ":latest"
+    if ":" not in installed:
+        installed += ":latest"
+    return installed == wanted
+
+
+async def check_status() -> tuple[bool, str]:
+    """(usable?, human-readable reason) for the configured model.
+
+    "Usable" means the server answers AND the configured model is installed —
+    a running server without the model would fail every explanation.
+    """
+    model = settings.ollama_model
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
             resp = await client.get(f"{settings.ollama_url}/api/tags")
-        return resp.status_code == 200
-    except httpx.HTTPError:
-        return False
+        resp.raise_for_status()
+        installed = [m.get("name", "") for m in resp.json().get("models", [])]
+    except (httpx.HTTPError, ValueError):
+        return False, f"Ollama not reachable at {settings.ollama_url} — run `ollama serve`."
+    if any(_model_matches(name, model) for name in installed):
+        return True, ""
+    have = ", ".join(installed) if installed else "none"
+    return False, (
+        f"Model '{model}' is not installed (installed: {have}). "
+        f"Run `ollama pull {model}` or set OLLAMA_MODEL to an installed model."
+    )
+
+
+async def is_available() -> bool:
+    """True if the configured model can be used right now."""
+    return (await check_status())[0]
 
 
 async def generate(req: ExplainRequest) -> AiExplanation:
@@ -98,6 +132,14 @@ async def generate(req: ExplainRequest) -> AiExplanation:
             )
         resp.raise_for_status()
         content = resp.json()["message"]["content"]
+    except httpx.HTTPStatusError as exc:
+        # Ollama answers 404 when the model isn't installed: say so plainly.
+        detail = ""
+        try:
+            detail = exc.response.json().get("error", "")
+        except ValueError:
+            pass
+        raise OllamaError(detail or str(exc)) from exc
     except (httpx.HTTPError, KeyError, ValueError) as exc:
         raise OllamaError(str(exc)) from exc
 

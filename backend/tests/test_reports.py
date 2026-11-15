@@ -253,3 +253,89 @@ async def test_export_endpoint(scan_id):
 
         assert (await ac.get(f"/api/scans/{scan_id}/report?format=pdf")).status_code == 422
         assert (await ac.get("/api/scans/999999/report")).status_code == 404
+
+
+def test_cyclonedx_dependency_graph_only_when_known():
+    from app.schemas.scan import Dependency, DependencyScanResult, ScanResponse
+
+    def scan(deps):
+        return ScanResponse(total_dependencies=len(deps), vulnerable_dependencies=0,
+                            results=[DependencyScanResult(dependency=d) for d in deps])
+
+    graph_deps = [
+        Dependency(name="express", version="4.18.2", ecosystem="npm", direct=True,
+                   depth=0, depends_on=["qs@6.11.0"]),
+        Dependency(name="qs", version="6.11.0", ecosystem="npm", direct=False, depth=1),
+    ]
+    bom = render_cyclonedx(scan(graph_deps))
+    assert bom["dependencies"] == [
+        {"ref": "soteria:project", "dependsOn": ["pkg:npm/express@4.18.2"]},
+        {"ref": "pkg:npm/express@4.18.2", "dependsOn": ["pkg:npm/qs@6.11.0"]},
+        {"ref": "pkg:npm/qs@6.11.0", "dependsOn": []},
+    ]
+    # requirements.txt: directness unknown → no graph claimed.
+    assert "dependencies" not in render_cyclonedx(scan([Dependency(name="flask", version="2.0.1")]))
+
+
+def test_cwe_and_exploit_flow_into_reports():
+    s = _scan()
+    v = s.results[1].vulnerabilities[0]
+    v.cwe_ids, v.has_public_exploit = ["CWE-79", "CWE-1321"], True
+    rule = next(r for r in render_sarif(s)["runs"][0]["tool"]["driver"]["rules"]
+                if r["id"] == "GHSA-proto")
+    assert "external/cwe/cwe-79" in rule["properties"]["tags"]
+    vuln = next(x for x in render_cyclonedx(s)["vulnerabilities"] if x["id"] == "GHSA-proto")
+    assert vuln["cwes"] == [79, 1321]
+    assert {"name": "soteria:public_exploit", "value": "true"} in vuln["properties"]
+
+
+# ---- official schema validation ----------------------------------------------
+
+from pathlib import Path  # noqa: E402
+
+_SCHEMAS = Path(__file__).parent / "fixtures" / "schemas"
+
+
+def _validator(schema_file: str):
+    from jsonschema import validators
+    from referencing import Registry, Resource
+    import referencing.jsonschema as rj
+
+    load = lambda n: json.loads((_SCHEMAS / n).read_text())  # noqa: E731
+    schema = load(schema_file)
+    registry = Registry()
+    for name in ("spdx.schema.json", "jsf-0.82.schema.json"):
+        registry = registry.with_resource(
+            name, Resource.from_contents(load(name), default_specification=rj.DRAFT7)
+        )
+    return validators.validator_for(schema)(schema, registry=registry)
+
+
+def _rich_scan() -> ScanResponse:
+    """_scan() plus everything optional: graph, CWEs, exploit flag."""
+    s = _scan()
+    v = s.results[1].vulnerabilities[0]
+    v.cwe_ids, v.has_public_exploit = ["CWE-79", "CWE-1321"], True
+    for r in s.results:
+        r.dependency.direct = r.dependency.name != "lodash"
+        r.dependency.depth = 0 if r.dependency.direct else 1
+    s.results[0].dependency.depends_on = ["lodash@4.17.20"]
+    return s
+
+
+@pytest.mark.parametrize("scan_factory", [_scan, _rich_scan])
+def test_sarif_matches_official_schema(scan_factory):
+    errors = list(_validator("sarif-schema-2.1.0.json").iter_errors(render_sarif(scan_factory())))
+    assert errors == [], [e.message for e in errors[:3]]
+
+
+@pytest.mark.parametrize("scan_factory", [_scan, _rich_scan])
+def test_cyclonedx_matches_official_schema(scan_factory):
+    errors = list(_validator("bom-1.5.schema.json").iter_errors(render_cyclonedx(scan_factory())))
+    assert errors == [], [e.message for e in errors[:3]]
+
+
+def test_schema_validation_is_not_vacuous():
+    bom = render_cyclonedx(_rich_scan())
+    bom["vulnerabilities"][0]["ratings"][0]["severity"] = "enormous"
+    assert list(_validator("bom-1.5.schema.json").iter_errors(bom))
