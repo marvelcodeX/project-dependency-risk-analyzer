@@ -11,7 +11,7 @@ defusedxml>=0.7.1         # safe parsing of untrusted pom.xml uploads
 sqlalchemy>=2.0.0
 greenlet>=3.0.0          # required by SQLAlchemy's async engine
 aiosqlite>=0.20.0        # default SQLite driver (zero-config)
-alembic>=1.13.0          # schema migrations (run automatically on startup)
+alembic>=1.20.1          # schema migrations (run automatically on startup)
 asyncpg>=0.30.0          # PostgreSQL driver (set DATABASE_URL=postgresql+asyncpg://...)
 
 # Dev / test
