@@ -12,7 +12,7 @@ sqlalchemy>=2.0.0
 greenlet>=3.0.0          # required by SQLAlchemy's async engine
 aiosqlite>=0.20.0        # default SQLite driver (zero-config)
 alembic>=1.13.0          # schema migrations (run automatically on startup)
-asyncpg>=0.30.0          # PostgreSQL driver (set DATABASE_URL=postgresql+asyncpg://...)
+asyncpg>=0.32.0          # PostgreSQL driver (set DATABASE_URL=postgresql+asyncpg://...)
 
 # Dev / test
 pytest>=9.0.3
