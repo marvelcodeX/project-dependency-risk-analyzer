@@ -39,7 +39,7 @@ Soteria-AI scans your project's dependencies for known vulnerabilities and uses 
 **Planned** (see Project Status for phase mapping)
 
 - 🌐 Git repo URL scanning and a proper PDF report (Phase 5)
-- 🚀 Docker Compose, hosted demo deploy, README screenshots (Phase 6)
+- 🚀 Docker Compose, hosted demo deploy, demo video (Phase 6)
 - 🔬 Function-level reachability with code evidence; reachability for Go / Java
 - 📦 More lockfiles (`poetry.lock`, `Pipfile.lock`, `yarn.lock`, `Cargo.lock`, Gradle)
 
@@ -261,7 +261,7 @@ Phases follow the project plan. ✅ done · 🟡 partly done · ⬜ not started
 | 3 · Reachability | Python + JavaScript import analysis, reachability in scoring and prompts | ✅ import-level, plus propagation through the lockfile graph; function-level with code evidence is a future refinement |
 | 4 · Dashboard & Visualization | Charts, risk gauge, filters, detail page, dependency tree, scan trends, theme toggle, responsive | ✅ (the tree is an expandable, vulnerable-path-first view rather than a force-directed graph — it stays readable with hundreds of packages) |
 | 5 · Multi-Ecosystem & Reporting | npm / Go / Maven parsers, PDF, JSON/SARIF, CycloneDX SBOM, Git repo URL scanning | 🟡 parsers and JSON/SARIF/SBOM/Markdown done; PDF only via printable HTML; **Git repo URL scanning not started** |
-| 6 · Polish & Deploy | Docker Compose, GitHub Actions, hosted deploy, tests, README media, demo | 🟡 CI, self-scan, release workflows, Docker image, backend + frontend tests, migrations done; no Compose file, hosted deploy, screenshots or demo |
+| 6 · Polish & Deploy | Docker Compose, GitHub Actions, hosted deploy, tests, README media, demo | 🟡 CI, self-scan, release workflows, Docker image, backend + frontend tests, migrations, README screenshots done; no Compose file, hosted deploy or demo video |
 | Stretch | GitHub Action that fails builds (plan §16) | ✅ pulled forward with Phase 6 CI |
 
 ## Contributing & security
